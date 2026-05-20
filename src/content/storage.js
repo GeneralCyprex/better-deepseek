@@ -325,7 +325,9 @@ export function bindStorageChangeListener() {
       if (state.ui) {
         state.ui.refreshSettings();
       }
-      window.dispatchEvent(new CustomEvent("bds:settingsChanged"));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent("bds:settingsChanged"));
+      }
     }
 
     if (changes[STORAGE_KEYS.skills]) {
