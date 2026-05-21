@@ -428,7 +428,8 @@
     },
     "sidebarMenu": {
       "tags": "Tags (BDS)",
-      "exportChat": "Export Chat (BDS)"
+      "exportChat": "Export Chat (BDS)",
+      "getBdsApp": "Get BDS App"
     },
     "sidebarSearch": {
       "placeholder": "Search history... (#tag)"

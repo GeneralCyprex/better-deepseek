@@ -37,6 +37,23 @@ function buildDropdownMenu() {
   return menu;
 }
 
+function buildSettingsDrawerMenu(labelText) {
+  const menu = document.createElement("div");
+  menu.className = "ds-dropdown-menu";
+  const items = ["Settings", "Report issue", labelText, "Log out"];
+  for (const text of items) {
+    const opt = document.createElement("div");
+    opt.className = "ds-dropdown-menu-option";
+    const itemLabel = document.createElement("div");
+    itemLabel.className = "ds-dropdown-menu-option__label";
+    itemLabel.textContent = text;
+    opt.appendChild(itemLabel);
+    menu.appendChild(opt);
+  }
+  document.body.appendChild(menu);
+  return menu;
+}
+
 describe("SidebarMenuInjector", () => {
   let initSidebarMenuInjector;
   let cleanup;
@@ -193,6 +210,68 @@ describe("SidebarMenuInjector", () => {
       document.body.appendChild(wrapper);
 
       await vi.waitFor(() => expect(menu.querySelector(".bds-export-option")).not.toBeNull());
+    });
+  });
+
+  describe("settings drawer injection", () => {
+    it("injects Get BDS App option when menu contains 'Get App'", async () => {
+      const menu = buildSettingsDrawerMenu("Get App");
+      await vi.waitFor(() => expect(menu.querySelector(".bds-get-app-option")).not.toBeNull());
+
+      const options = menu.querySelectorAll(".ds-dropdown-menu-option");
+      const labels = Array.from(options).map((o) =>
+        o.querySelector(".ds-dropdown-menu-option__label")?.textContent.trim()
+      );
+      const getAppIdx = labels.indexOf("Get App");
+      const bdsIdx = labels.indexOf("Get BDS App");
+      expect(getAppIdx).toBeGreaterThanOrEqual(0);
+      expect(bdsIdx).toBe(getAppIdx + 1);
+    });
+
+    it("injects Get BDS App option when menu contains 'Download mobile App'", async () => {
+      const menu = buildSettingsDrawerMenu("Download mobile App");
+      await vi.waitFor(() => expect(menu.querySelector(".bds-get-app-option")).not.toBeNull());
+
+      const options = menu.querySelectorAll(".ds-dropdown-menu-option");
+      const labels = Array.from(options).map((o) =>
+        o.querySelector(".ds-dropdown-menu-option__label")?.textContent.trim()
+      );
+      const targetIdx = labels.indexOf("Download mobile App");
+      const bdsIdx = labels.indexOf("Get BDS App");
+      expect(bdsIdx).toBe(targetIdx + 1);
+    });
+
+    it("does not inject Get BDS App into chat context menus (no target text)", async () => {
+      const menu = buildDropdownMenu();
+      await vi.waitFor(() => expect(menu.querySelector(".bds-export-option")).not.toBeNull());
+      // small extra wait to confirm it never appears
+      await new Promise((r) => setTimeout(r, 100));
+      expect(menu.querySelector(".bds-get-app-option")).toBeNull();
+    });
+
+    it("does not inject Get BDS App twice", async () => {
+      const menu = buildSettingsDrawerMenu("Get App");
+      await vi.waitFor(() => expect(menu.querySelector(".bds-get-app-option")).not.toBeNull());
+
+      document.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 150));
+
+      expect(menu.querySelectorAll(".bds-get-app-option")).toHaveLength(1);
+    });
+
+    it("opens GitHub releases URL when Get BDS App is clicked", async () => {
+      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+
+      const menu = buildSettingsDrawerMenu("Get App");
+      await vi.waitFor(() => expect(menu.querySelector(".bds-get-app-option")).not.toBeNull());
+
+      menu.querySelector(".bds-get-app-option").click();
+
+      expect(openSpy).toHaveBeenCalledWith(
+        "https://github.com/EdgeTypE/better-deepseek/releases",
+        "_blank"
+      );
+      openSpy.mockRestore();
     });
   });
 

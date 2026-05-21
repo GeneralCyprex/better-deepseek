@@ -424,7 +424,8 @@
     },
     "sidebarMenu": {
       "tags": "Etiketler (BDS)",
-      "exportChat": "Sohbeti Dışa Aktar (BDS)"
+      "exportChat": "Sohbeti Dışa Aktar (BDS)",
+      "getBdsApp": "BDS Uygulamasını İndir"
     },
     "sidebarSearch": {
       "placeholder": "Sohbette ara... (#etiket)"

@@ -20,6 +20,16 @@ const TAG_ICON = `
   <line x1="7" y1="7" x2="7.01" y2="7"/>
 </svg>`;
 
+// Download Icon
+const DOWNLOAD_ICON = `
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+  <polyline points="7 10 12 15 17 10"/>
+  <line x1="12" y1="15" x2="12" y2="3"/>
+</svg>`;
+
+const GET_BDS_APP_URL = "https://github.com/EdgeTypE/better-deepseek/releases";
+
 export function initSidebarMenuInjector() {
   // Capture the chat URL from any click inside a sidebar chat link.
   // The three-dot menu button is a descendant of the <a> element, so this
@@ -48,7 +58,10 @@ export function initSidebarMenuInjector() {
   // Secondary backup for menu injection on any click
   function handleBackupScan() {
     setTimeout(() => {
-      document.querySelectorAll(".ds-dropdown-menu").forEach(injectOptions);
+      document.querySelectorAll(".ds-dropdown-menu").forEach((menu) => {
+        injectOptions(menu);
+        injectSettingsDrawerOptions(menu);
+      });
     }, 100);
   }
 
@@ -61,9 +74,13 @@ export function initSidebarMenuInjector() {
         if (node.nodeType === 1) {
           if (node.classList.contains("ds-dropdown-menu")) {
             injectOptions(node);
+            injectSettingsDrawerOptions(node);
           } else {
             const menu = node.querySelector(".ds-dropdown-menu");
-            if (menu) injectOptions(menu);
+            if (menu) {
+              injectOptions(menu);
+              injectSettingsDrawerOptions(menu);
+            }
           }
         }
       }
@@ -144,6 +161,34 @@ function injectOptions(menu) {
 
   menu.insertBefore(tagsOption, insertBefore);
   menu.insertBefore(exportOption, insertBefore);
+}
+
+function injectSettingsDrawerOptions(menu) {
+  if (menu.querySelector(".bds-get-app-option")) return;
+
+  const targetLabels = ["Download mobile App", "Get App"];
+  let targetOption = null;
+  for (const label of targetLabels) {
+    targetOption = Array.from(
+      menu.querySelectorAll(".ds-dropdown-menu-option")
+    ).find((opt) =>
+      opt.querySelector(".ds-dropdown-menu-option__label")?.textContent.trim().includes(label)
+    );
+    if (targetOption) break;
+  }
+
+  if (!targetOption) return;
+
+  const bdsOption = createMenuOption(
+    i18n.t('sidebarMenu.getBdsApp'),
+    DOWNLOAD_ICON,
+    "bds-get-app-option",
+    () => {
+      window.open(GET_BDS_APP_URL, "_blank");
+    }
+  );
+
+  targetOption.parentNode.insertBefore(bdsOption, targetOption.nextSibling);
 }
 
 function createMenuOption(label, iconHtml, className, onClick) {
