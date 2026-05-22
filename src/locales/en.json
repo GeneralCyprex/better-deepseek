@@ -181,7 +181,6 @@
       "linkDirectory": "+ Link Local Directory",
       "selectingDir": "Selecting directory...",
       "dirHint": "Files are read live from your filesystem (not copied). Chromium-based browsers only.",
-      "cancel": "Cancel",
       "deleteProject": "Delete Project",
       "nameIsRequired": "Name is required.",
       "filePickFailed": "File pick failed.",
@@ -534,6 +533,31 @@
       "seeAllChanges": "See all changes in v{{version}} on GitHub",
       "seeDetailed": "See detailed release notes on GitHub",
       "features": {
+        "v0_1_7": {
+          "title": "Localization, Custom Prompts & RAG",
+          "features": {
+            "feat_0": {
+              "title": "Localization System",
+              "description": "Better DeepSeek now supports multiple languages. Help us improve translations or add your language on <a href='https://github.com/EdgeTypE/better-deepseek/blob/main/LOCALIZATION.md' target='_blank' style='color: #4d6bfe; text-decoration: underline;'>GitHub</a>."
+            },
+            "feat_1": {
+              "title": "Custom Prompts",
+              "description": "Create, save, and switch between multiple system prompts effortlessly."
+            },
+            "feat_2": {
+              "title": "Project RAG Search",
+              "description": "A primitive RAG system has been added. Connect a project or select a local folder for file search. We'll continue improving this in future releases."
+            },
+            "feat_3": {
+              "title": "UI Improvements",
+              "description": "Collapse/expand for long messages, extension icon opens DeepSeek website, server status and announcement banners and more..."
+            },
+            "feat_4": {
+              "title": "Bug Fixes & Performance",
+              "description": "BDS tool parser and Office tool improvements. Fixed font rendering issues. Various stability and performance optimizations and more..."
+            }
+          }
+        },
         "v0_1_6": {
           "title": "Android & Organization",
           "features": {

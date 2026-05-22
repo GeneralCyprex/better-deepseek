@@ -1,5 +1,37 @@
 export const VERSION_HISTORY = [
   {
+    version: "0.1.7",
+    date: "2026-05-22",
+    title: "Localization, Custom Prompts & RAG",
+    features: [
+      {
+        type: "feature",
+        title: "Localization System",
+        description: "Better DeepSeek now supports multiple languages. Help us improve translations or add your language on <a href='https://github.com/EdgeTypE/better-deepseek' target='_blank' style='color: #4d6bfe; text-decoration: underline;'>GitHub</a>."
+      },
+      {
+        type: "feature",
+        title: "Custom Prompts",
+        description: "Create, save, and switch between multiple system prompts effortlessly."
+      },
+      {
+        type: "feature",
+        title: "Project RAG Search",
+        description: "A primitive RAG system has been added. Connect a project or select a local folder for file search. We'll continue improving this in future releases."
+      },
+      {
+        type: "feature",
+        title: "UI Improvements",
+        description: "Collapse/expand for long messages, extension icon opens DeepSeek website, renderable cards for fetch operations, server status and announcement banners."
+      },
+      {
+        type: "bugfix",
+        title: "Bug Fixes & Performance",
+        description: "BDS tool parser and Office tool improvements. Fixed font rendering issues. Various stability and performance optimizations."
+      }
+    ]
+  },
+  {
     version: "0.1.6",
     date: "2026-05-12",
     title: "Android & Organization",

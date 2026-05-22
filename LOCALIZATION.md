@@ -18,12 +18,12 @@ Copy `src/locales/en.json` to `src/locales/{code}.json` where `{code}` is your l
 
 ### 2. Translate every string
 
-Open your new file and replace the English values with translations. The `updatedAt` field at the top should reflect today's date. The structure inside `messages` must remain identical, keys are never translated, only their values.
+Open your new file and replace the English values with translations. The `updatedAt` field at the top should reflect today's date in ISO 8601 format (`YYYY-MM-DDT00:00:00Z`). The structure inside `messages` must remain identical, keys are never translated, only their values.
 
 Example:
 ```json
 {
-  "updatedAt": "2026-05-20",
+  "updatedAt": "2026-05-20T00:00:00Z",
   "messages": {
     "common": {
       "save": "Speichern",
@@ -36,19 +36,7 @@ Example:
 }
 ```
 
-### 3. Register the language in the i18n manager
-
-Open `src/lib/i18n.svelte.js` and add your locale to the import and the `locales` map:
-
-```javascript
-import en from "../locales/en.json";
-import tr from "../locales/tr.json";
-import de from "../locales/de.json";              // ← add
-
-const locales = { en, tr, de };                    // ← add
-```
-
-### 4. Add the language name to the locale files
+### 3. Add the language name to the locale files
 
 Add an entry under `messages.language` so it appears in the Settings language picker:
 
@@ -70,7 +58,7 @@ In your new `de.json`:
 }
 ```
 
-### 5. Build and test
+### 4. Build and test
 
 Rebuild the extension:
 
@@ -82,7 +70,42 @@ Load the unpacked extension from `dist-chrome`, open the settings drawer, and sw
 
 ### Submitting your translation
 
-Open a pull request with your new locale file and the changes to `src/lib/i18n.svelte.js` and `src/locales/en.json`. If you're not comfortable with Git or pull requests, that's fine, just attach your translated JSON file to a [new issue](https://github.com/EdgeTypE/better-deepseek/issues/new) and mention which language it's for. I'll take care of the rest.
+Open a pull request with your new locale file and the updated `src/locales/en.json`. If you're not comfortable with Git or pull requests, that's fine, just attach your translated JSON file to a [new issue](https://github.com/EdgeTypE/better-deepseek/issues/new) and mention which language it's for. I'll take care of the rest.
+
+## How Language Selection Works
+
+Better DeepSeek has two language selection modes controlled by the **Sync extension language with browser** toggle (`settings.syncLocale`) in the Settings drawer.
+
+- **Auto-sync (default)**: When enabled, the extension ignores any manually saved locale and auto-detects the language on every page load:
+  1. DeepSeek's `NEXT_LOCALE` cookie (reflects the language selected on the DeepSeek web UI)
+  2. The browser's `navigator.language`
+  3. Falls back to the first available locale (English)
+
+- **Manual**: When disabled, the user picks a language from the dropdown. That choice is persisted to `chrome.storage.local` and reused on every page load.
+
+The auto-detection logic runs in `i18n.init()` (`src/lib/i18n.svelte.js`) and is triggered both on extension start and whenever the settings change in another tab. You don't need to do anything special for this feature — once your `.json` file exists in `src/locales/`, it becomes eligible for both auto-detection and the manual picker.
+
+## Remote Language Updates
+
+Better DeepSeek can fetch the latest translations directly from the GitHub repository without requiring an extension update. This ensures users always have access to up-to-date translations even between releases.
+
+**How it works:**
+
+1. On every startup, and when the user clicks **Check for Language Updates** in Settings, the extension fetches the latest locale files from `https://raw.githubusercontent.com/EdgeTypE/better-deepseek/main/src/locales/`.
+2. Each fetched file is compared to the bundled version using its `updatedAt` timestamp. If the remote version is newer, it replaces the bundled one in memory.
+3. Updated locale data is persisted in `chrome.storage.local` so it survives browser restarts.
+4. The **Reset to Factory Languages** button restores the original bundled translations.
+
+This means a translator can submit a PR, have it merged to `main`, and users can pull the update immediately — no need to wait for a new extension release.
+
+The `updatedAt` field at the top of each locale file is critical for this system. Always set it to the current date when you make changes:
+
+```json
+{
+  "updatedAt": "2026-05-22T00:00:00Z",
+  "messages": { ... }
+}
+```
 
 ## Things to Keep in Mind
 

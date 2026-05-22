@@ -341,6 +341,15 @@ Better DeepSeek does not collect, transmit, or sell any personal data. All setti
 
 ## Changelog
 
+### v0.1.7 (2026-05-22)
+- **New Feature**: Localization System. Better DeepSeek now supports multiple languages. Help us improve translations or add your own language, visit [Localization](extension/LOCALIZATION.md) page.
+- **New Feature**: Custom Prompts. Create, save, and switch between multiple system prompts with ease.
+- **New Feature**: Project RAG Search. A primitive RAG system for searching through project files and local folders.
+- **New Feature**: Server status checker that notifies you when DeepSeek servers are experiencing issues.
+- **New Feature**: Announcement banner for BDS updates and important notices.
+- **UX Improvements**: Collapse/expand toggle for long messages in prompt box and message box. Extension icon now opens the DeepSeek website on click. Renderable cards for Web Fetch and GitHub Fetch operations.
+- **Bug Fixes and Tool Improvements**: Resolved font and size rendering issues in the DeepSeek interface. BDS tool parser improvements, Office tool improvements, and various performance optimizations.
+
 ### v0.1.6 (2026-05-12)
 - **New Platform**: Better DeepSeek is now available on Android. (Thanks to [@WhiteLicorice](https://github.com/WhiteLicorice)).
 - **New Feature**: Chat Filtering & Grouping. Organize your conversations with tags and filter them from the sidebar.
