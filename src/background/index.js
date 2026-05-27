@@ -360,7 +360,7 @@ function detectCharsetFromHeaders(resp) {
   const contentType = resp.headers.get("content-type");
   if (!contentType) return null;
   const match = contentType.match(/charset\s*=\s*([^\s;]+)/i);
-  return match ? match[1].trim() : null;
+  return match ? match[1].trim().replace(/^["']|["']$/g, "") : null;
 }
 
 function detectCharsetFromHtml(buffer) {
