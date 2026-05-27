@@ -352,6 +352,29 @@ export async function fetchGithubCommits(owner, repo, branch, count, token) {
   return commits;
 }
 
+/**
+ * Detect character encoding from HTTP headers or HTML meta tags.
+ * Returns a charset string or null if none is found.
+ */
+function detectCharsetFromHeaders(resp) {
+  const contentType = resp.headers.get("content-type");
+  if (!contentType) return null;
+  const match = contentType.match(/charset\s*=\s*([^\s;]+)/i);
+  return match ? match[1].trim() : null;
+}
+
+function detectCharsetFromHtml(buffer) {
+  const scanView = new TextDecoder("latin1").decode(buffer.slice(0, 10240));
+
+  let match = scanView.match(/<meta[\s>][^>]*charset\s*=\s*["']?\s*([a-zA-Z0-9_-]+)\s*["']?[^>]*\/?>/i);
+  if (match) return match[1];
+
+  match = scanView.match(/<meta\s+http-equiv\s*=\s*["']?\s*Content-Type\s*["']?\s*content\s*=\s*["'][^"']*charset\s*=\s*([a-zA-Z0-9_-]+)/i);
+  if (match) return match[1];
+
+  return null;
+}
+
 async function fetchPageContent(url, options = {}) {
   if (!url) throw new Error("No URL provided.");
 
@@ -369,7 +392,18 @@ async function fetchPageContent(url, options = {}) {
     throw new Error(`Server returned ${resp.status} for ${url}`);
   }
 
-  return await resp.text();
+  const buffer = await resp.arrayBuffer();
+
+  let charset = detectCharsetFromHeaders(resp);
+  if (!charset) {
+    charset = detectCharsetFromHtml(buffer);
+  }
+
+  try {
+    return new TextDecoder(charset || "utf-8", { fatal: false }).decode(buffer);
+  } catch {
+    return new TextDecoder("utf-8", { fatal: false }).decode(buffer);
+  }
 }
 
 // Open chat.deepseek.com when the extension toolbar icon is clicked
