@@ -118,7 +118,7 @@ html.dark, body.dark, .dark :root {
   color: var(--bds-text-primary);
   max-height: 82vh;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;
   padding: 24px;
   transition: background var(--bds-transition), border-color var(--bds-transition);
 }
@@ -544,6 +544,7 @@ textarea.bds-input,
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  min-width: 0;
   transition: border-color var(--bds-transition);
 }
 
@@ -603,6 +604,7 @@ textarea.bds-input,
   font-size: 13px;
   display: grid;
   gap: 4px;
+  min-width: 0;
   transition: border-color var(--bds-transition);
 }
 
