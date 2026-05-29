@@ -19,6 +19,7 @@ import androidx.core.content.FileProvider
 import androidx.documentfile.provider.DocumentFile
 import java.io.File
 import java.io.FileOutputStream
+import java.nio.charset.Charset
 import java.util.concurrent.TimeUnit
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
@@ -488,8 +489,50 @@ class WebViewBridge(
                 return
             }
             response.put("ok", true)
-            response.put("html", resp.body?.string() ?: "")
+            val bytes = resp.body?.bytes()
+            if (bytes != null) {
+                val charset = detectCharsetFromHeaders(resp) ?: detectCharsetFromHtml(bytes)
+                val html = try {
+                    String(bytes, Charset.forName(charset ?: "UTF-8"))
+                } catch (_: Exception) {
+                    String(bytes, Charset.forName("UTF-8"))
+                }
+                response.put("html", html)
+            } else {
+                response.put("html", "")
+            }
         }
+    }
+
+    private fun detectCharsetFromHeaders(resp: okhttp3.Response): String? {
+        val contentType = resp.header("Content-Type") ?: return null
+        val regex = Regex("""charset\s*=\s*([^\s;]+)""", RegexOption.IGNORE_CASE)
+        return regex.find(contentType)
+            ?.groupValues
+            ?.get(1)
+            ?.trim()
+            ?.removeSurrounding("\"")
+            ?.removeSurrounding("'")
+    }
+
+    private fun detectCharsetFromHtml(bytes: ByteArray): String? {
+        val scanSize = minOf(bytes.size, 10240)
+        val scanBytes = bytes.copyOfRange(0, scanSize)
+        val scanView = scanBytes.toString(Charset.forName("ISO-8859-1"))
+
+        val metaCharset = Regex(
+            """<meta[\s>][^>]*charset\s*=\s*["']?\s*([a-zA-Z0-9_-]+)\s*["']?[^>]*\/?>""",
+            RegexOption.IGNORE_CASE
+        ).find(scanView)
+        if (metaCharset != null) return metaCharset.groupValues[1]
+
+        val httpEquiv = Regex(
+            """<meta\s+http-equiv\s*=\s*["']?\s*Content-Type\s*["']?\s*content\s*=\s*["'][^"']*charset\s*=\s*([a-zA-Z0-9_-]+)""",
+            RegexOption.IGNORE_CASE
+        ).find(scanView)
+        if (httpEquiv != null) return httpEquiv.groupValues[1]
+
+        return null
     }
 
     private fun handleFetchGithubZip(payload: JSONObject, response: JSONObject) {
