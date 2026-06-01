@@ -77,7 +77,16 @@ describe("RemoteConfigManager", () => {
 
     it("returns an object for nested paths", () => {
       const mode = getConfig("features.attachMenu.expertMode");
-      expect(mode).toEqual({ show: false, showGithub: true, showWeb: true, showFolder: false });
+      expect(mode).toEqual({
+        show: false,
+        showPlus: true,
+        showUploadFile: false,
+        showUploadFolder: false,
+        showGithub: true,
+        showWeb: true,
+        showProject: true,
+        showVoice: true,
+      });
     });
 
     it("returns undefined for non-existent paths", () => {
