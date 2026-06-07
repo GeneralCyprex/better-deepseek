@@ -23,8 +23,19 @@ export function normalizeConfig(config) {
 
   const activeProject = normalizeActiveProject(config.activeProject);
 
+  const rawEntries = Array.isArray(config.systemPromptEntries) ? config.systemPromptEntries : [];
+  const systemPromptEntries = rawEntries
+    .map(e => ({
+      id: String(e && e.id ? e.id : ""),
+      content: String(e && e.content ? e.content : ""),
+      enabled: e && typeof e.enabled === "boolean" ? e.enabled : true,
+      schedule: normalizeSchedule(e && e.schedule),
+    }))
+    .filter(e => e.id && e.content.trim().length > 0 && e.enabled);
+
   return {
     systemPrompt: String(config.systemPrompt || ""),
+    systemPromptEntries,
     skills,
     memories,
     activeCharacter: config.activeCharacter || null,
@@ -57,6 +68,16 @@ function normalizeActiveProject(raw) {
   if (!name) return null;
 
   return { name, instructions, files };
+}
+
+function normalizeSchedule(raw) {
+  if (!raw || typeof raw !== "object") return { type: "first", everyNTurns: 1 };
+  const type = String(raw.type || "first");
+  const validTypes = ["first", "always", "interval"];
+  return {
+    type: validTypes.includes(type) ? type : "first",
+    everyNTurns: Math.max(1, Math.floor(Number(raw.everyNTurns) || 3)),
+  };
 }
 
 export function sanitizeKey(value) {

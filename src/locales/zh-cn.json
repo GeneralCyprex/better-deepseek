@@ -106,6 +106,8 @@
       "keepEditing": "继续编辑",
       "customCSS": "自定义 CSS",
       "customCSSPlaceholder": "/* 在此粘贴你的 CSS 覆盖，或从上方选择一个预设 */",
+      "multiPromptMode": "多系统提示词模式（高级）",
+      "scheduleType": "注入计划",
       "cssPresets": "预设",
       "presetNone": "无",
       "presetReducePadding": "减少聊天内边距",

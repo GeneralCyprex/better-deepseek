@@ -154,6 +154,15 @@ export async function pushConfigToPage() {
 
     const detail = {
       systemPrompt: String(activeSystemPrompt),
+      systemPromptEntries: state.settings.systemPromptMultiMode
+        ? (state.settings.systemPromptEntries || [])
+            .filter(e => e.enabled && e.content && e.content.trim())
+            .map(e => ({
+              id: e.id,
+              content: e.content,
+              schedule: e.schedule || { type: "first", everyNTurns: 1 },
+            }))
+        : [],
       skills: state.skills
         .filter((skill) => skill.active)
         .map((skill) => ({ name: skill.name, content: skill.content })),

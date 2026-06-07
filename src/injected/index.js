@@ -47,15 +47,36 @@ import { patchXmlHttpRequest } from "./xhr-patch.js";
     localStorage.setItem('bds_injected_chars', JSON.stringify(chars));
   }
 
+  function getInjectedEntries(convId) {
+    try {
+      const all = JSON.parse(localStorage.getItem('bds_injected_entries') || '{}');
+      return all[convId] || [];
+    } catch { return []; }
+  }
+
+  function markEntryInjected(convId, entryId) {
+    try {
+      const all = JSON.parse(localStorage.getItem('bds_injected_entries') || '{}');
+      if (!all[convId]) all[convId] = [];
+      if (!all[convId].includes(entryId)) all[convId].push(entryId);
+      const keys = Object.keys(all);
+      if (keys.length > 50) delete all[keys[0]];
+      localStorage.setItem('bds_injected_entries', JSON.stringify(all));
+    } catch { /* ignore */ }
+  }
+
   const state = {
     config: {
       systemPrompt: "",
+      systemPromptEntries: [],
       skills: [],
       memories: [],
       activeCharacter: null,
     },
     hasInjected: (id) => getInjectedChats().includes(id),
     markInjected: (id) => addInjectedChat(id),
+    getInjectedEntries: (convId) => getInjectedEntries(convId),
+    markEntryInjected: (convId, entryId) => markEntryInjected(convId, entryId),
     getLastChar: (id) => getInjectedCharacters()[id] || null,
     setLastChar: (id, name) => setInjectedCharacter(id, name),
     currentSessionChar: null, // memory cache for default ID transition

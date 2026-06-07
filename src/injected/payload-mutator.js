@@ -275,17 +275,31 @@ export function buildHiddenPrefix(
 ) {
   const blocks = [];
 
-  const shouldInjectSystemPrompt =
-    forceSystemPrompt && 
-    state.config.systemPrompt.trim() && 
-    !state.config.disableSystemPrompt;
+  const entries = state.config.systemPromptEntries || [];
+  if (entries.length > 0) {
+    const userMsgCount = state.sessionUserMsgCounts[conversationId] || 1;
+    for (const entry of entries) {
+      if (!entry.content.trim()) continue;
+      if (evaluateEntrySchedule(entry, userMsgCount, conversationId, state)) {
+        blocks.push(`<BetterDeepSeek>\n${entry.content.trim()}\n</BetterDeepSeek>`);
+        if (state.markEntryInjected) {
+          state.markEntryInjected(conversationId, entry.id);
+        }
+      }
+    }
+  } else {
+    const shouldInjectSystemPrompt =
+      forceSystemPrompt && 
+      state.config.systemPrompt.trim() && 
+      !state.config.disableSystemPrompt;
 
-  if (shouldInjectSystemPrompt) {
-    blocks.push(
-      `<BetterDeepSeek>\n${state.config.systemPrompt.trim()}\n</BetterDeepSeek>`
-    );
-    if (state.markInjected) {
-      state.markInjected(conversationId);
+    if (shouldInjectSystemPrompt) {
+      blocks.push(
+        `<BetterDeepSeek>\n${state.config.systemPrompt.trim()}\n</BetterDeepSeek>`
+      );
+      if (state.markInjected) {
+        state.markInjected(conversationId);
+      }
     }
   }
 
@@ -554,6 +568,29 @@ export function buildUserDataBlock(state) {
 
   if (blocks.length === 0) return "";
   return `<BetterDeepSeek>\n${blocks.join("\n")}\n</BetterDeepSeek>`;
+}
+
+/**
+ * Evaluate whether a specific system prompt entry should be injected
+ * based on its schedule and injection history.
+ */
+export function evaluateEntrySchedule(entry, userMsgCount, conversationId, state) {
+  const injectedIds = state.getInjectedEntries ? state.getInjectedEntries(conversationId) : [];
+  const alreadyInjected = injectedIds.includes(entry.id);
+
+  switch (entry.schedule.type) {
+    case "first":
+      return !alreadyInjected;
+    case "always":
+      return true;
+    case "interval": {
+      const interval = entry.schedule.everyNTurns || 3;
+      if (!alreadyInjected) return true;
+      return (userMsgCount - 1) % interval === 0;
+    }
+    default:
+      return false;
+  }
 }
 
 /**

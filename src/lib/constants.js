@@ -685,6 +685,8 @@ export const DEFAULT_SETTINGS = {
   collapseLongUserMessages: true,
   injectSystemDateTime: true,
   customCSS: "",
+  systemPromptMultiMode: false,
+  systemPromptEntries: [],
 };
 
 // ── Default Remote Config (built-in fallback) ──

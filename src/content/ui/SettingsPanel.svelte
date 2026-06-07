@@ -23,6 +23,10 @@
   let promptEditorContent = $state("");
   let promptEditorIsNew = $state(false);
 
+  let multiEntryScheduleType = $state("first");
+  let multiEntryScheduleInterval = $state(3);
+  let multiEntryEnabled = $state(true);
+
   let autoFiles = $state(Boolean(appState.settings.autoDownloadFiles));
   let autoZip = $state(Boolean(appState.settings.autoDownloadLongWorkZip));
   let voiceMode = $state(Boolean(appState.settings.voiceMode));
@@ -37,6 +41,8 @@
   let disableSystemPrompt = $state(
     Boolean(appState.settings.disableSystemPrompt),
   );
+  let systemPromptMultiMode = $state(Boolean(appState.settings.systemPromptMultiMode));
+  let systemPromptEntries = $state(appState.settings.systemPromptEntries || []);
   let systemPromptInjectionFrequency = $state(
     appState.settings.systemPromptInjectionFrequency || "first",
   );
@@ -71,6 +77,7 @@
     return JSON.stringify({
       autoFiles, autoZip, voiceMode, voiceLanguage, autoSubmitVoice,
       preferredLang, githubToken, disableSystemPrompt,
+      systemPromptMultiMode, systemPromptEntries,
       systemPromptInjectionFrequency, systemPromptInjectionInterval,
       disableMemory, htmlToMarkdownMaxDepth, maxChatSessions,
       tokenPriceDisplay, projectRagEnabled, projectRagLimit,
@@ -122,6 +129,8 @@
   export function refresh() {
     customSystemPrompts = appState.settings.customSystemPrompts || [];
     activeSystemPromptId = appState.settings.activeSystemPromptId || "default";
+    systemPromptMultiMode = Boolean(appState.settings.systemPromptMultiMode);
+    systemPromptEntries = appState.settings.systemPromptEntries || [];
     autoFiles = Boolean(appState.settings.autoDownloadFiles);
     autoZip = Boolean(appState.settings.autoDownloadLongWorkZip);
     voiceMode = Boolean(appState.settings.voiceMode);
@@ -229,6 +238,14 @@
 
     appState.settings.customSystemPrompts = snapshots;
     appState.settings.activeSystemPromptId = activeSystemPromptId;
+    appState.settings.systemPromptMultiMode = systemPromptMultiMode;
+    let entriesSnapshot;
+    try {
+      entriesSnapshot = $state.snapshot(systemPromptEntries);
+    } catch (e) {
+      entriesSnapshot = JSON.parse(JSON.stringify(systemPromptEntries));
+    }
+    appState.settings.systemPromptEntries = entriesSnapshot;
 
     // When "default" is active, ensure the stored prompt always reflects the
     // latest built-in default so subsequent page loads see the current version.
@@ -342,6 +359,128 @@
     promptEditorContent = appState.settings.systemPrompt || DEFAULT_SYSTEM_PROMPT;
   }
 
+  function scheduleLabel(entry) {
+    if (!entry.schedule) return t('settings.firstMessage');
+    switch (entry.schedule.type) {
+      case "first": return t('settings.firstMessage');
+      case "always": return t('settings.everyMessage');
+      case "interval": return t('settings.injectEveryN', { n: entry.schedule.everyNTurns || 3 });
+      default: return t('settings.firstMessage');
+    }
+  }
+
+  function openMultiEntryEditor(entry = null) {
+    if (entry) {
+      editingPrompt = entry;
+      promptEditorName = entry.name;
+      promptEditorContent = entry.content;
+      promptEditorIsNew = false;
+      multiEntryScheduleType = entry.schedule?.type || "first";
+      multiEntryScheduleInterval = entry.schedule?.everyNTurns || 3;
+      multiEntryEnabled = entry.enabled !== false;
+    } else {
+      editingPrompt = null;
+      promptEditorName = "";
+      promptEditorContent = "";
+      promptEditorIsNew = true;
+      multiEntryScheduleType = "first";
+      multiEntryScheduleInterval = 3;
+      multiEntryEnabled = true;
+    }
+    showPromptEditor = true;
+  }
+
+  function saveMultiEntry() {
+    if (!promptEditorName.trim() || !promptEditorContent.trim()) {
+      if (appState.ui) appState.ui.showToast(t('settings.nameRequired'));
+      return;
+    }
+
+    if (promptEditorIsNew) {
+      const newEntry = {
+        id: "sp_" + Math.random().toString(36).substring(2, 9),
+        name: promptEditorName.trim(),
+        content: promptEditorContent.trim(),
+        enabled: multiEntryEnabled,
+        schedule: {
+          type: multiEntryScheduleType,
+          everyNTurns: multiEntryScheduleType === "interval" ? Math.max(1, Math.floor(Number(multiEntryScheduleInterval) || 3)) : 1,
+        },
+      };
+      systemPromptEntries = [...systemPromptEntries, newEntry];
+    } else if (editingPrompt) {
+      systemPromptEntries = systemPromptEntries.map(e =>
+        e.id === editingPrompt.id
+          ? {
+              ...e,
+              name: promptEditorName.trim(),
+              content: promptEditorContent.trim(),
+              enabled: multiEntryEnabled,
+              schedule: {
+                type: multiEntryScheduleType,
+                everyNTurns: multiEntryScheduleType === "interval" ? Math.max(1, Math.floor(Number(multiEntryScheduleInterval) || 3)) : 1,
+              },
+            }
+          : e
+      );
+    }
+
+    closePromptEditor();
+    save();
+  }
+
+  function deleteMultiEntry(id) {
+    systemPromptEntries = systemPromptEntries.filter(e => e.id !== id);
+    save();
+  }
+
+  function toggleMultiMode() {
+    systemPromptMultiMode = !systemPromptMultiMode;
+    if (systemPromptMultiMode) {
+      // Migrate existing prompts to multi-entry format
+      if (systemPromptEntries.length === 0) {
+        const entries = [];
+        // Add default prompt
+        entries.push({
+          id: "sp_default",
+          name: t('settings.defaultPromptName'),
+          content: appState.settings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+          enabled: !disableSystemPrompt,
+          schedule: {
+            type: systemPromptInjectionFrequency === "every_x" ? "interval" : systemPromptInjectionFrequency,
+            everyNTurns: Number(systemPromptInjectionInterval) || 3,
+          },
+        });
+        // Add custom prompts that were active
+        for (const cp of (appState.settings.customSystemPrompts || [])) {
+          entries.push({
+            id: cp.id,
+            name: cp.name,
+            content: cp.content,
+            enabled: cp.id === appState.settings.activeSystemPromptId,
+            schedule: { type: "first", everyNTurns: 1 },
+          });
+        }
+        systemPromptEntries = entries;
+      }
+    } else {
+      // Going back to single mode - keep first enabled entry as active prompt
+      const firstEnabled = systemPromptEntries.find(e => e.enabled);
+      if (firstEnabled) {
+        customSystemPrompts = customSystemPrompts.filter(p => p.id === firstEnabled.id);
+        if (!customSystemPrompts.find(p => p.id === firstEnabled.id)) {
+          customSystemPrompts = [{
+            id: firstEnabled.id,
+            name: firstEnabled.name,
+            content: firstEnabled.content,
+          }, ...customSystemPrompts];
+        }
+        activeSystemPromptId = firstEnabled.id;
+      }
+    }
+    save();
+  }
+
   function getGithubTokenDisplayValue() {
     if (showGithubToken) {
       return githubToken;
@@ -391,77 +530,155 @@
   <label class="bds-label">{t('settings.systemPrompts')}</label>
 </div>
 
-<div class="bds-list">
-  <div class="bds-skill-item" class:active={activeSystemPromptId === "default"}>
-    <label onclick={() => { activeSystemPromptId = "default"; save(); }} role="button" tabindex="0">
-      <input type="radio" checked={activeSystemPromptId === "default"} readonly />
-      <div class="bds-prompt-info">
-        <span class="bds-prompt-name">{t('settings.defaultPromptName')}</span>
-        <span class="bds-prompt-status">{t('settings.defaultPromptStatus')}</span>
-      </div>
-    </label>
-    <div class="bds-prompt-actions">
-      <button class="bds-btn-outlined" style="font-size: 11px; padding: 4px 8px;" title={t('settings.view')} onclick={() => openPromptEditor({ id: 'default', name: t('settings.defaultPromptName'), content: appState.settings.systemPrompt || DEFAULT_SYSTEM_PROMPT, readonly: true })}>
-        {t('settings.view')}
-      </button>
-    </div>
-  </div>
+<div class="bds-toggle-row" style="margin-bottom: 8px;">
+  <span class="bds-toggle-label" style="font-size: 12px;">{t('settings.multiPromptMode')}</span>
+  <label class="bds-switch">
+    <input type="checkbox" checked={systemPromptMultiMode} onchange={toggleMultiMode} />
+    <span class="bds-switch-track"></span>
+  </label>
+</div>
 
-  {#each customSystemPrompts as prompt (prompt.id)}
-    <div class="bds-skill-item" class:active={activeSystemPromptId === prompt.id}>
-      <label onclick={() => { activeSystemPromptId = prompt.id; save(); }} role="button" tabindex="0">
-        <input type="radio" checked={activeSystemPromptId === prompt.id} readonly />
+{#if systemPromptMultiMode}
+  <div class="bds-list">
+    {#each systemPromptEntries as entry (entry.id)}
+      <div class="bds-skill-item">
+        <label class="bds-switch" style="margin-right: 8px; flex: none;">
+          <input type="checkbox" checked={entry.enabled} onchange={() => {
+            systemPromptEntries = systemPromptEntries.map(e =>
+              e.id === entry.id ? { ...e, enabled: !e.enabled } : e
+            );
+            save();
+          }} />
+          <span class="bds-switch-track"></span>
+        </label>
         <div class="bds-prompt-info">
-          <span class="bds-prompt-name">{prompt.name}</span>
-          <span class="bds-prompt-status">{t('settings.customPromptStatus')}</span>
+          <span class="bds-prompt-name">{entry.name}</span>
+          <span class="bds-prompt-status">{scheduleLabel(entry)}</span>
+        </div>
+        <div class="bds-prompt-actions">
+          <button class="bds-btn-outlined" style="font-size: 11px; padding: 4px 8px;" title={t('settings.edit')} onclick={() => openMultiEntryEditor(entry)}>
+            {t('settings.edit')}
+          </button>
+          <button class="bds-btn-danger" title={t('settings.delete')} onclick={() => deleteMultiEntry(entry.id)}>
+            {t('settings.delete')}
+          </button>
+        </div>
+      </div>
+    {/each}
+
+    <button class="bds-add-prompt-btn" type="button" onclick={() => openMultiEntryEditor(null)}>
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right: 4px;"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      {t('settings.addNewPrompt')}
+    </button>
+  </div>
+{:else}
+  <div class="bds-list">
+    <div class="bds-skill-item" class:active={activeSystemPromptId === "default"}>
+      <label onclick={() => { activeSystemPromptId = "default"; save(); }} role="button" tabindex="0">
+        <input type="radio" checked={activeSystemPromptId === "default"} readonly />
+        <div class="bds-prompt-info">
+          <span class="bds-prompt-name">{t('settings.defaultPromptName')}</span>
+          <span class="bds-prompt-status">{t('settings.defaultPromptStatus')}</span>
         </div>
       </label>
       <div class="bds-prompt-actions">
-        <button class="bds-btn-outlined" style="font-size: 11px; padding: 4px 8px;" title={t('settings.edit')} onclick={() => openPromptEditor(prompt)}>
-          {t('settings.edit')}
-        </button>
-        <button class="bds-btn-danger" title={t('settings.delete')} onclick={() => deletePrompt(prompt.id)}>
-          {t('settings.delete')}
+        <button class="bds-btn-outlined" style="font-size: 11px; padding: 4px 8px;" title={t('settings.view')} onclick={() => openPromptEditor({ id: 'default', name: t('settings.defaultPromptName'), content: appState.settings.systemPrompt || DEFAULT_SYSTEM_PROMPT, readonly: true })}>
+          {t('settings.view')}
         </button>
       </div>
     </div>
-  {/each}
 
-  <button class="bds-add-prompt-btn" type="button" onclick={() => openPromptEditor()}>
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right: 4px;"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-    {t('settings.addNewPrompt')}
-  </button>
-</div>
+    {#each customSystemPrompts as prompt (prompt.id)}
+      <div class="bds-skill-item" class:active={activeSystemPromptId === prompt.id}>
+        <label onclick={() => { activeSystemPromptId = prompt.id; save(); }} role="button" tabindex="0">
+          <input type="radio" checked={activeSystemPromptId === prompt.id} readonly />
+          <div class="bds-prompt-info">
+            <span class="bds-prompt-name">{prompt.name}</span>
+            <span class="bds-prompt-status">{t('settings.customPromptStatus')}</span>
+          </div>
+        </label>
+        <div class="bds-prompt-actions">
+          <button class="bds-btn-outlined" style="font-size: 11px; padding: 4px 8px;" title={t('settings.edit')} onclick={() => openPromptEditor(prompt)}>
+            {t('settings.edit')}
+          </button>
+          <button class="bds-btn-danger" title={t('settings.delete')} onclick={() => deletePrompt(prompt.id)}>
+            {t('settings.delete')}
+          </button>
+        </div>
+      </div>
+    {/each}
+
+    <button class="bds-add-prompt-btn" type="button" onclick={() => openPromptEditor()}>
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right: 4px;"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      {t('settings.addNewPrompt')}
+    </button>
+  </div>
+{/if}
 
 {#if showPromptEditor}
   <div class="bds-modal-overlay">
     <div class="bds-modal">
       <div class="bds-modal-header">
-        <div class="ds-modal-content__title">{promptEditorIsNew ? t('settings.addNewTitle') : (editingPrompt?.readonly ? t('settings.viewTitle') : t('settings.editTitle'))}</div>
+        <div class="ds-modal-content__title">
+          {#if systemPromptMultiMode}
+            {promptEditorIsNew ? t('settings.addNewTitle') : t('settings.editTitle')}
+          {:else}
+            {promptEditorIsNew ? t('settings.addNewTitle') : (editingPrompt?.readonly ? t('settings.viewTitle') : t('settings.editTitle'))}
+          {/if}
+        </div>
         <button class="bds-modal-close" onclick={closePromptEditor}>×</button>
       </div>
       
       <div class="bds-modal-body">
         <div class="bds-field">
           <label class="bds-label">{t('settings.nameLabel')}</label>
-          <input type="text" class="bds-input" bind:value={promptEditorName} placeholder={t('settings.namePlaceholder')} readonly={editingPrompt?.readonly} />
+          <input type="text" class="bds-input" bind:value={promptEditorName} placeholder={t('settings.namePlaceholder')} readonly={editingPrompt?.readonly && !systemPromptMultiMode} />
         </div>
+
+        {#if systemPromptMultiMode}
+          <div class="bds-field">
+            <label class="bds-label">{t('settings.scheduleType')}</label>
+            <select class="bds-select" bind:value={multiEntryScheduleType}>
+              <option value="first">{t('settings.firstMessage')}</option>
+              <option value="always">{t('settings.everyMessage')}</option>
+              <option value="interval">{t('settings.everyNMessages')}</option>
+            </select>
+          </div>
+
+          {#if multiEntryScheduleType === "interval"}
+            <div class="bds-field">
+              <label class="bds-label">{t('settings.injectionInterval')}</label>
+              <input type="number" min="2" class="bds-input" style="width: 100px;" bind:value={multiEntryScheduleInterval} />
+              <p style="font-size: 10px; opacity: 0.5; margin: 2px 0 0;">
+                {t('settings.injectEveryN', { n: multiEntryScheduleInterval })}
+              </p>
+            </div>
+          {/if}
+
+          <div class="bds-toggle-row" style="padding: 0;">
+            <span class="bds-toggle-label">{t('settings.enabled')}</span>
+            <label class="bds-switch">
+              <input type="checkbox" bind:checked={multiEntryEnabled} />
+              <span class="bds-switch-track"></span>
+            </label>
+          </div>
+        {/if}
         
         <div class="bds-field">
           <div class="bds-label-row">
             <label class="bds-label">{t('settings.contentLabel')}</label>
-            {#if !editingPrompt?.readonly}
+            {#if !editingPrompt?.readonly || systemPromptMultiMode}
               <button class="bds-reset-btn" type="button" onclick={baseOnDefault}>{t('settings.baseOnDefault')}</button>
             {/if}
           </div>
-          <textarea class="bds-input" style="min-height: 240px;" bind:value={promptEditorContent} placeholder={t('settings.contentPlaceholder')} readonly={editingPrompt?.readonly}></textarea>
+          <textarea class="bds-input" style="min-height: 240px;" bind:value={promptEditorContent} placeholder={t('settings.contentPlaceholder')} readonly={editingPrompt?.readonly && !systemPromptMultiMode}></textarea>
         </div>
       </div>
 
       <div class="bds-modal-footer">
         <button class="bds-btn-outlined" onclick={closePromptEditor}>{t('settings.cancel')}</button>
-        {#if !editingPrompt?.readonly}
-          <button class="bds-btn" onclick={savePrompt}>{t('settings.savePrompt')}</button>
+        {#if !editingPrompt?.readonly || systemPromptMultiMode}
+          <button class="bds-btn" onclick={systemPromptMultiMode ? saveMultiEntry : savePrompt}>{t('settings.savePrompt')}</button>
         {/if}
       </div>
     </div>

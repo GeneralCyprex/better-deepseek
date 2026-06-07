@@ -106,6 +106,8 @@
       "keepEditing": "Düzenlemeye Devam Et",
       "customCSS": "Özel CSS",
       "customCSSPlaceholder": "/* CSS kodunuzu buraya yapıştırın veya yukarıdan bir hazır şablon seçin */",
+      "multiPromptMode": "Çoklu Sistem Yönergesi Modu (Gelişmiş)",
+      "scheduleType": "Enjeksiyon Planlaması",
       "cssPresets": "Hazır Şablonlar",
       "presetNone": "Yok",
       "presetReducePadding": "Daraltılmış Boşluk",

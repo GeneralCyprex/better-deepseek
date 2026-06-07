@@ -106,6 +106,8 @@
       "keepEditing": "Продолжить редактирование",
       "customCSS": "Пользовательский CSS",
       "customCSSPlaceholder": "/* Вставьте ваш CSS или выберите пресет выше */",
+      "multiPromptMode": "Режим нескольких системных промптов (расширенный)",
+      "scheduleType": "Расписание инъекций",
       "cssPresets": "Пресеты",
       "presetNone": "Нет",
       "presetReducePadding": "Уменьшить отступы",
