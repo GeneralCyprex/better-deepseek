@@ -193,6 +193,17 @@ function scanInputArea() {
     nativeButton.style.setProperty("display", "none", "important");
   }
 
+  const deepResearchMountPoint = document.createElement("div");
+  deepResearchMountPoint.className = "bds-deep-research-mount";
+  wrapper.insertBefore(deepResearchMountPoint, fileInput);
+  mount(DeepResearchToggle, {
+    target: deepResearchMountPoint,
+    props: {
+      enabled: state.deepResearch.enabled,
+      onToggle: (enabled) => setDeepResearchEnabled(enabled),
+    },
+  });
+
   const mountPoint = document.createElement("div");
   wrapper.insertBefore(mountPoint, fileInput);
 
@@ -210,17 +221,6 @@ function scanInputArea() {
   const ragMountPoint = document.createElement("div");
   wrapper.insertBefore(ragMountPoint, fileInput);
   mount(RagPreview, { target: ragMountPoint });
-
-  const deepResearchMountPoint = document.createElement("div");
-  deepResearchMountPoint.className = "bds-deep-research-mount";
-  wrapper.insertBefore(deepResearchMountPoint, fileInput);
-  mount(DeepResearchToggle, {
-    target: deepResearchMountPoint,
-    props: {
-      enabled: state.deepResearch.enabled,
-      onToggle: (enabled) => setDeepResearchEnabled(enabled),
-    },
-  });
 
   wrapper.setAttribute("data-bds-attach-menu-mounted", "true");
 }
