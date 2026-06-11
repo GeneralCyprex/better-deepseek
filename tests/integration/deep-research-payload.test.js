@@ -66,4 +66,45 @@ describe("Deep Research payload mutation", () => {
 
     expect(result.payload.messages[0].content).not.toContain("[BDS:DEEP_RESEARCH]");
   });
+
+  it("preserves approved plan control messages instead of stripping them to empty", () => {
+    const state = makeInjectedState();
+    state.config.deepResearch.enabled = false;
+    const payload = {
+      conversation_id: "conv_laptops",
+      messages: [{
+        role: "user",
+        content: [
+          "<BetterDeepSeek>",
+          "[BDS:DEEP_RESEARCH] Plan approved for run run_laptops. Execute the following research plan:",
+          '{"title":"Laptop research","steps":[]}',
+          "</BetterDeepSeek>",
+        ].join("\n"),
+      }],
+    };
+
+    const result = mutatePayload(payload, state);
+
+    expect(result.payload.messages[0].content).toContain("[BDS:DEEP_RESEARCH] Plan approved");
+    expect(result.payload.messages[0].content).toContain("Laptop research");
+  });
+
+  it("preserves revision control messages instead of stripping them to empty", () => {
+    const state = makeInjectedState();
+    state.config.deepResearch.enabled = false;
+    const payload = {
+      conversation_id: "conv_laptops",
+      prompt: [
+        "<BetterDeepSeek>",
+        "[BDS:DEEP_RESEARCH] Revision requested for run run_laptops.",
+        "User feedback: Add warranty checks.",
+        "</BetterDeepSeek>",
+      ].join("\n"),
+    };
+
+    const result = mutatePayload(payload, state);
+
+    expect(result.payload.prompt).toContain("[BDS:DEEP_RESEARCH] Revision requested");
+    expect(result.payload.prompt).toContain("Add warranty checks.");
+  });
 });

@@ -174,20 +174,13 @@ function scanPage() {
  */
 export function scanInputArea() {
   const fileInput = document.querySelector('input[type="file"][multiple]');
-  if (!fileInput) return;
-
-  const wrapper = fileInput.parentElement;
+  const wrapper = findComposerControlsWrapper(fileInput);
   if (!wrapper) {
     return;
   }
 
-  const prevSibling = fileInput.previousElementSibling;
-  let nativeButton = null;
-  if (prevSibling && prevSibling.getAttribute("role") === "button") {
-    nativeButton = prevSibling;
-  } else {
-    nativeButton = wrapper.querySelector('div[role="button"][tabindex="0"]');
-  }
+  const insertBeforeNode = fileInput || findComposerInsertAnchor(wrapper);
+  const nativeButton = fileInput ? findNativeFileInputTrigger(fileInput) : null;
 
   if (nativeButton) {
     nativeButton.style.setProperty("display", "none", "important");
@@ -197,7 +190,7 @@ export function scanInputArea() {
     wrapper,
     "bds-deep-research-mount",
     ".bds-deep-research-toggle",
-    fileInput,
+    insertBeforeNode,
   );
   if (!deepResearchMountPoint.dataset.bdsMounted) {
     mount(DeepResearchToggle, {
@@ -208,6 +201,11 @@ export function scanInputArea() {
       },
     });
     deepResearchMountPoint.dataset.bdsMounted = "1";
+  }
+
+  if (!fileInput) {
+    wrapper.setAttribute("data-bds-attach-menu-mounted", "true");
+    return;
   }
 
   const mountPoint = ensureComposerMount(
@@ -249,6 +247,67 @@ export function scanInputArea() {
   }
 
   wrapper.setAttribute("data-bds-attach-menu-mounted", "true");
+}
+
+function findComposerControlsWrapper(fileInput) {
+  if (fileInput?.parentElement) {
+    return fileInput.parentElement;
+  }
+
+  const sendButton = findDeepSeekSendButton();
+  if (sendButton?.parentElement) {
+    return sendButton.parentElement;
+  }
+
+  const editor = document.querySelector("textarea#chat-input, textarea[placeholder], [contenteditable='true']");
+  return editor?.parentElement || null;
+}
+
+function findDeepSeekSendButton() {
+  const buttons = Array.from(document.querySelectorAll('div[role="button"], button'));
+  return buttons.find((button) => {
+    if (button.closest("#bds-root")) {
+      return false;
+    }
+    return (
+      button.querySelector?.('svg path[d*="M8.3125"], .ds-icon-send') ||
+      button.querySelector?.('svg path[d*="M13.12 19.98"]') ||
+      button.title === "Send message" ||
+      button.ariaLabel === "Send Message" ||
+      button.getAttribute("aria-label") === "Send Message"
+    );
+  }) || null;
+}
+
+function findComposerInsertAnchor(wrapper) {
+  return Array.from(wrapper.children).find((child) =>
+    !child.classList?.contains("bds-deep-research-mount") &&
+    !child.closest?.("#bds-root")
+  ) || null;
+}
+
+function findNativeFileInputTrigger(fileInput) {
+  const candidate = fileInput.previousElementSibling;
+  if (!candidate || candidate.closest("#bds-root")) {
+    return null;
+  }
+
+  if (
+    candidate.classList?.contains("bds-deep-research-mount") ||
+    candidate.classList?.contains("bds-attach-menu-mount") ||
+    candidate.classList?.contains("bds-expand-toggle-mount") ||
+    candidate.classList?.contains("bds-rag-preview-mount")
+  ) {
+    return null;
+  }
+
+  const tag = String(candidate.tagName || "").toLowerCase();
+  const isButtonLike =
+    tag === "button" ||
+    tag === "label" ||
+    candidate.getAttribute("role") === "button";
+
+  return isButtonLike ? candidate : null;
 }
 
 function ensureComposerMount(wrapper, className, descendantSelector, beforeNode) {

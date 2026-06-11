@@ -711,11 +711,16 @@ export function getLastProjectNameInHistory(messages, excludeTarget = null) {
 export function stripInjectedBlocks(text) {
   let output = String(text || "");
   
-  // Strip <BetterDeepSeek> blocks UNLESS they contain [BDS:AUTO] markers or memory calls
+  // Strip hidden prompt/context blocks unless they are explicit tool-control messages
+  // that the model must see as the user's next instruction.
   output = output.replace(
     /<BetterDeepSeek>([\s\S]*?)<\/BetterDeepSeek>/gi,
     (match, content) => {
-      if (content.includes("[BDS:AUTO]") || /<BDS:memory_calls[\s>]/i.test(content)) {
+      if (
+        content.includes("[BDS:AUTO]") ||
+        content.includes("[BDS:DEEP_RESEARCH]") ||
+        /<BDS:memory_calls[\s>]/i.test(content)
+      ) {
         return match;
       }
       return "";

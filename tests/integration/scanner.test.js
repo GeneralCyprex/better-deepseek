@@ -84,4 +84,51 @@ describe("scanner input controls", () => {
     expect(mountMock.mock.calls[0][0]).toBe(deepResearchToggleMock);
     expect(mountMock.mock.calls[0][1].target).toBe(deepResearchMount);
   });
+
+  it("hides only the native upload trigger directly associated with the file input", async () => {
+    document.body.innerHTML = `
+      <div id="composer">
+        <button id="native-upload" type="button"></button>
+        <input type="file" multiple />
+      </div>
+    `;
+    const { scanInputArea } = await import("../../src/content/scanner.js");
+
+    scanInputArea();
+
+    expect(document.querySelector("#native-upload").style.display).toBe("none");
+  });
+
+  it("does not hide unrelated composer buttons when mounting controls", async () => {
+    document.body.innerHTML = `
+      <div id="composer">
+        <div id="model-option" role="button" tabindex="0">Expert</div>
+        <span></span>
+        <input type="file" multiple />
+      </div>
+    `;
+    const { scanInputArea } = await import("../../src/content/scanner.js");
+
+    scanInputArea();
+
+    expect(document.querySelector("#model-option").style.display).not.toBe("none");
+  });
+
+  it("mounts Deep Research when Expert mode has no native file input", async () => {
+    document.body.innerHTML = `
+      <div id="composer">
+        <button id="send" title="Send message" type="button"></button>
+      </div>
+    `;
+    const { scanInputArea } = await import("../../src/content/scanner.js");
+
+    scanInputArea();
+
+    const wrapper = document.querySelector("#composer");
+    const deepResearchMount = wrapper.querySelector(".bds-deep-research-mount");
+
+    expect(deepResearchMount).toBeTruthy();
+    expect(wrapper.querySelector(".bds-attach-menu-mount")).toBeNull();
+    expect(mountMock.mock.calls[0][0]).toBe(deepResearchToggleMock);
+  });
 });

@@ -705,7 +705,7 @@ export const DEFAULT_REMOTE_CONFIG = {
     apiPlayground: { enabled: true },
     attachMenu: {
       enabled: true,
-      expertMode: { show: false, showPlus: true, showUploadFile: false, showUploadFolder: false, showGithub: true, showWeb: true, showProject: true, showVoice: true },
+      expertMode: { show: true, showPlus: false, showUploadFile: false, showUploadFolder: false, showGithub: false, showWeb: false, showProject: true, showVoice: true },
       instantMode: { show: true, showPlus: true, showUploadFile: true, showUploadFolder: true, showGithub: true, showWeb: true, showProject: true, showVoice: true },
       deepthinkMode: { show: true, showPlus: true, showUploadFile: true, showUploadFolder: true, showGithub: true, showWeb: true, showProject: true, showVoice: true },
     },
