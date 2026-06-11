@@ -100,6 +100,19 @@ describe("auto integration", () => {
     expect(inputListener).toHaveBeenCalled();
   });
 
+  it("sets plaintext-only contenteditable chat input text", async () => {
+    document.body.innerHTML = '<div role="textbox" contenteditable="plaintext-only"></div>';
+    const editor = document.querySelector('[role="textbox"]');
+    const inputListener = vi.fn();
+    editor.addEventListener("input", inputListener);
+    const { setChatInputText } = await importAutoModule();
+
+    expect(setChatInputText("Revision request")).toBe(true);
+
+    expect(editor.textContent).toBe("Revision request");
+    expect(inputListener).toHaveBeenCalled();
+  });
+
   it("sets ProseMirror-style contenteditable chat input as paragraphs", async () => {
     document.body.innerHTML = '<div class="ProseMirror" contenteditable="true"><p><br></p></div>';
     const editor = document.querySelector(".ProseMirror");

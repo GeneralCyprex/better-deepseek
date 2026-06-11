@@ -13,6 +13,7 @@ import {
   parseTagAttributes,
   normalizeTaggedCodeContent,
 } from "./tag-parser.js";
+import { parseLooseJson } from "./json-repair.js";
 import { parseMemoryWrite } from "./memory-parser.js";
 import { sanitizeVisibleText } from "./text-sanitizer.js";
 
@@ -183,23 +184,24 @@ export function parseBdsMessage(rawText, isSettled = false) {
 
     if (name === "deep_research_plan") {
       const runId = attrs.runId || attrs.runid || "";
-      try {
-        const plan = JSON.parse(content);
-        result.deepResearch.plans.push({ runId, plan });
-      } catch (e) {
-        // Store raw content if JSON is malformed
-        result.deepResearch.plans.push({ runId, plan: null, raw: content, error: e.message });
-      }
+      const parsedPlan = parseLooseJson(content);
+      result.deepResearch.plans.push({
+        runId,
+        plan: parsedPlan.value,
+        raw: parsedPlan.value ? "" : content,
+        error: parsedPlan.error,
+      });
     }
 
     if (name === "deep_research_status") {
       const runId = attrs.runId || attrs.runid || "";
-      try {
-        const status = JSON.parse(content);
-        result.deepResearch.statuses.push({ runId, status });
-      } catch (e) {
-        result.deepResearch.statuses.push({ runId, status: null, raw: content, error: e.message });
-      }
+      const parsedStatus = parseLooseJson(content);
+      result.deepResearch.statuses.push({
+        runId,
+        status: parsedStatus.value,
+        raw: parsedStatus.value ? "" : content,
+        error: parsedStatus.error,
+      });
     }
 
     if (name === "deep_research_report") {

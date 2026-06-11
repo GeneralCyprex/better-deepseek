@@ -5,6 +5,7 @@ import DeepResearchPlanCard from "../../../src/content/ui/DeepResearchPlanCard.s
 import DeepResearchStatusCard from "../../../src/content/ui/DeepResearchStatusCard.svelte";
 import DeepResearchReportCard from "../../../src/content/ui/DeepResearchReportCard.svelte";
 import DeepResearchToggle from "../../../src/content/ui/DeepResearchToggle.svelte";
+import DeepResearchRevisionPanel from "../../../src/content/ui/DeepResearchRevisionPanel.svelte";
 import { renderSvelte, flushUi } from "../../helpers/svelte.js";
 
 describe("Deep Research UI components", () => {
@@ -83,60 +84,19 @@ describe("Deep Research UI components", () => {
       cleanup();
     });
 
-    it("shows feedback textarea on request changes click", async () => {
+    it("calls onRequestChanges on request changes click", async () => {
+      const onRequestChanges = vi.fn();
       const plan = { title: "Test", steps: [] };
       const { target, cleanup } = renderSvelte(DeepResearchPlanCard, {
         runId: "r1",
         plan,
-        onRequestChanges: vi.fn(),
-      });
-      await flushUi();
-
-      // First click shows feedback input
-      target.querySelector('[data-testid="dr-revise-btn"]').click();
-      await flushUi();
-
-      expect(target.querySelector('[data-testid="dr-feedback-input"]')).toBeTruthy();
-      cleanup();
-    });
-
-    it("submits feedback text on second request changes action", async () => {
-      const onRequestChanges = vi.fn();
-      const plan = { title: "Test", steps: [] };
-      const { target, cleanup } = renderSvelte(DeepResearchPlanCard, {
-        runId: "r2",
-        plan,
         onRequestChanges,
       });
       await flushUi();
 
       target.querySelector('[data-testid="dr-revise-btn"]').click();
-      await flushUi();
-      const input = target.querySelector('[data-testid="dr-feedback-input"]');
-      input.value = "Add seller warranty checks";
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      await flushUi();
-      target.querySelector('[data-testid="dr-submit-feedback-btn"]').click();
 
-      expect(onRequestChanges).toHaveBeenCalledWith("r2", "Add seller warranty checks");
-      cleanup();
-    });
-
-    it("submits revision request even when feedback is empty", async () => {
-      const onRequestChanges = vi.fn();
-      const plan = { title: "Test", steps: [] };
-      const { target, cleanup } = renderSvelte(DeepResearchPlanCard, {
-        runId: "r-empty",
-        plan,
-        onRequestChanges,
-      });
-      await flushUi();
-
-      target.querySelector('[data-testid="dr-revise-btn"]').click();
-      await flushUi();
-      target.querySelector('[data-testid="dr-submit-feedback-btn"]').click();
-
-      expect(onRequestChanges).toHaveBeenCalledWith("r-empty", "");
+      expect(onRequestChanges).toHaveBeenCalledWith("r1");
       cleanup();
     });
 
@@ -172,6 +132,44 @@ describe("Deep Research UI components", () => {
 
       expect(target.querySelector('[data-testid="dr-approve-btn"]')).toBeNull();
       cleanup();
+    });
+  });
+
+  describe("DeepResearchRevisionPanel", () => {
+    it("attaches to the composer and dispatches revision feedback", async () => {
+      vi.useFakeTimers();
+      try {
+        document.body.innerHTML = '<div class="ds-textarea"><textarea id="chat-input"></textarea></div>';
+        const listener = vi.fn();
+        window.addEventListener("bds:deep-research-revise", listener, { once: true });
+        const plan = { title: "Test Plan", steps: [] };
+        const { cleanup } = renderSvelte(DeepResearchRevisionPanel);
+        await flushUi();
+
+        window.dispatchEvent(new CustomEvent("bds:deep-research-open-revision", {
+          detail: { runId: "run-feedback", plan },
+        }));
+        await vi.advanceTimersByTimeAsync(150);
+        await flushUi();
+
+        const panel = document.querySelector('[data-testid="deep-research-revision-panel"]');
+        expect(panel?.parentElement?.classList.contains("ds-textarea")).toBe(true);
+        const input = document.querySelector('[data-testid="deep-research-revision-input"]');
+        input.value = "Add seller warranty checks";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        await flushUi();
+        document.querySelector('[data-testid="deep-research-revision-submit"]').click();
+
+        expect(listener).toHaveBeenCalledOnce();
+        expect(listener.mock.calls[0][0].detail).toMatchObject({
+          runId: "run-feedback",
+          plan,
+          feedback: "Add seller warranty checks",
+        });
+        cleanup();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
@@ -303,7 +301,9 @@ describe("Deep Research UI components", () => {
 
       const btn = target.querySelector('[data-testid="deep-research-toggle"]');
       expect(btn.tagName.toLowerCase()).toBe("div");
-      expect(btn.getAttribute("role")).toBe("button");
+      expect(btn.hasAttribute("role")).toBe(false);
+      expect(btn.hasAttribute("title")).toBe(false);
+      expect(btn.hasAttribute("aria-label")).toBe(false);
       expect(btn.querySelector(".ds-toggle-button__icon .ds-icon svg")).toBeTruthy();
       expect(btn.querySelector(".ds-focus-ring")).toBeTruthy();
       expect(btn.querySelector("span._6dbc175")?.textContent).toBe("DeepResearch");

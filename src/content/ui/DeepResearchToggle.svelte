@@ -29,12 +29,11 @@
   }
 </script>
 
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   tabindex="0"
-  role="button"
-  aria-label={localEnabled ? "Disable Deep Research Mode" : "Enable Deep Research Mode"}
   aria-pressed={localEnabled}
-  title={localEnabled ? "Deep Research Mode ON" : "Enable Deep Research Mode"}
   class="bds-deep-research-toggle f79352dc ds-toggle-button ds-toggle-button--m"
   class:ds-toggle-button--selected={localEnabled}
   class:bds-deep-research-toggle--selected={localEnabled}

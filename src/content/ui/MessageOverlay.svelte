@@ -15,6 +15,7 @@
   import DeepResearchReportCard from "./DeepResearchReportCard.svelte";
   import LoadingIndicator from "./LoadingIndicator.svelte";
   import { t } from "../../lib/i18n.svelte.js";
+  import { parseLooseJson } from "../parser/json-repair.js";
 
 
   /** 
@@ -91,11 +92,7 @@
   }
 
   function parseJsonBlock(content) {
-    try {
-      return { value: JSON.parse(content), error: "" };
-    } catch (error) {
-      return { value: null, error: error?.message || "Invalid JSON" };
-    }
+    return parseLooseJson(content);
   }
 
   function getRunId(block) {
@@ -112,13 +109,12 @@
     }));
   }
 
-  function requestDeepResearchChanges(block, feedback) {
+  function requestDeepResearchChanges(block) {
     const parsedPlan = parseJsonBlock(block.content).value;
-    window.dispatchEvent(new CustomEvent("bds:deep-research-revise", {
+    window.dispatchEvent(new CustomEvent("bds:deep-research-open-revision", {
       detail: {
         runId: getRunId(block),
         plan: parsedPlan,
-        feedback,
       },
     }));
   }
@@ -319,7 +315,7 @@
           error={parsedPlan.error}
           interactive={isDeepResearchPlanInteractive(getRunId(block))}
           onApprove={() => approveDeepResearch(block)}
-          onRequestChanges={(_, feedback) => requestDeepResearchChanges(block, feedback)}
+          onRequestChanges={() => requestDeepResearchChanges(block)}
           onCancel={() => cancelDeepResearch(block)}
         />
       {:else if block.name === 'deep_research_status'}

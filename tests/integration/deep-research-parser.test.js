@@ -25,6 +25,26 @@ describe("Deep Research tag parsing", () => {
       expect(result.deepResearch.plans[0].error).toBeTruthy();
     });
 
+    it("repairs common plan JSON mistakes from model output", () => {
+      const text = `<BDS:DEEP_RESEARCH_PLAN runId="repair1">{
+        "title": "Rooting Tecno POVA Pro 5G",
+        "steps": [
+          {
+            "id": 1,
+            "action": "search",
+            "query": ""Tecno POVA Pro 5G" root magisk 2025 2026",
+            "purpose": "Catch recent guides",
+          },
+        ],
+      }</BDS:DEEP_RESEARCH_PLAN>`;
+      const result = parseBdsMessage(text);
+
+      expect(result.deepResearch.plans).toHaveLength(1);
+      expect(result.deepResearch.plans[0].runId).toBe("repair1");
+      expect(result.deepResearch.plans[0].plan.title).toBe("Rooting Tecno POVA Pro 5G");
+      expect(result.deepResearch.plans[0].plan.steps[0].query).toContain("Tecno POVA Pro 5G");
+    });
+
     it("parses plan without runId attribute", () => {
       const text = `<BDS:DEEP_RESEARCH_PLAN>{"title":"Test","steps":[]}</BDS:DEEP_RESEARCH_PLAN>`;
       const result = parseBdsMessage(text);

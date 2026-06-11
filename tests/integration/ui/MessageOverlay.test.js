@@ -106,13 +106,13 @@ describe("MessageOverlay integration", () => {
     cleanup();
   });
 
-  it("dispatches deep research revision feedback for request changes", async () => {
+  it("opens deep research revision feedback for request changes", async () => {
     const plan = {
       title: "Gaming Laptop Research",
       steps: [{ id: 1, action: "search", query: "best gaming laptop", purpose: "overview" }],
     };
     const listener = vi.fn();
-    window.addEventListener("bds:deep-research-revise", listener, { once: true });
+    window.addEventListener("bds:deep-research-open-revision", listener, { once: true });
     appState.deepResearch.enabled = true;
     appState.deepResearch.runs = [{
       id: "run-revise",
@@ -134,17 +134,48 @@ describe("MessageOverlay integration", () => {
     await flushUi();
 
     target.querySelector('[data-testid="dr-revise-btn"]').click();
-    await flushUi();
-    const input = target.querySelector('[data-testid="dr-feedback-input"]');
-    input.value = "Add warranty and seller reputation checks.";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    await flushUi();
-    target.querySelector('[data-testid="dr-submit-feedback-btn"]').click();
 
     expect(listener).toHaveBeenCalledOnce();
     expect(listener.mock.calls[0][0].detail.runId).toBe("run-revise");
-    expect(listener.mock.calls[0][0].detail.feedback).toBe("Add warranty and seller reputation checks.");
     expect(listener.mock.calls[0][0].detail.plan.title).toBe("Gaming Laptop Research");
+    cleanup();
+  });
+
+  it("renders deep research plan JSON with trailing commas and quoted query terms", async () => {
+    const content = `{
+      "title": "Rooting Tecno POVA Pro 5G",
+      "steps": [
+        {
+          "id": 1,
+          "action": "search",
+          "query": ""Tecno POVA Pro 5G" root magisk 2025 2026",
+          "purpose": "Catch recent guides",
+        },
+      ],
+    }`;
+    appState.deepResearch.enabled = true;
+    appState.deepResearch.runs = [{
+      id: "run-json",
+      conversationId: "conv1",
+      status: "planning",
+      plan: null,
+      sourceLedger: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }];
+
+    const { target, cleanup } = renderSvelte(MessageOverlay, {
+      blocks: [{
+        name: "deep_research_plan",
+        attrs: { runId: "run-json" },
+        content,
+      }],
+    });
+    await flushUi();
+
+    expect(target.textContent).toContain("Rooting Tecno POVA Pro 5G");
+    expect(target.textContent).toContain("Tecno POVA Pro 5G");
+    expect(target.textContent).not.toContain("Failed to parse");
     cleanup();
   });
 });

@@ -387,26 +387,36 @@ export function initDeepResearchRuntime() {
     const detail = normalizeEventDetail(event.detail);
     const run = ensureRun(detail.runId, detail.conversationId);
     run.plan = detail.plan || run.plan;
+    const sent = injectPureTextAndSend(buildApprovalMessage(run), "Deep Research approval");
+    if (sent === false) {
+      state.ui?.showToast?.("Could not submit Deep Research approval.");
+      emitRunState(run);
+      return;
+    }
     setStatus(run, "approved");
     setStatus(run, "running");
     upsertRun(run);
     emitRunState(run);
     void persistRuns(state.deepResearch.runs);
-    injectPureTextAndSend(buildApprovalMessage(run), "Deep Research approval");
   });
 
   window.addEventListener("bds:deep-research-revise", (event) => {
     const detail = normalizeEventDetail(event.detail);
     const run = ensureRun(detail.runId, detail.conversationId);
     run.plan = detail.plan || run.plan;
+    const sent = injectPureTextAndSend(
+      buildRevisionMessage(run, String(detail.feedback || "")),
+      "Deep Research revision request",
+    );
+    if (sent === false) {
+      state.ui?.showToast?.("Could not submit Deep Research feedback.");
+      emitRunState(run);
+      return;
+    }
     setStatus(run, "awaiting_revision");
     upsertRun(run);
     emitRunState(run);
     void persistRuns(state.deepResearch.runs);
-    injectPureTextAndSend(
-      buildRevisionMessage(run, String(detail.feedback || "")),
-      "Deep Research revision request",
-    );
   });
 
   window.addEventListener("bds:deep-research-cancel", (event) => {

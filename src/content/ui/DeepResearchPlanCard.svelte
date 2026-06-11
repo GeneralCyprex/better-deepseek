@@ -21,16 +21,10 @@
   let title = $derived(parsedPlan ? (parsedPlan.title || "Research Plan") : "Research Plan");
   let hasMalformedJson = $derived(!parsedPlan && (!!raw || !!error));
 
-  let feedbackText = $state("");
-  let showFeedback = $state(false);
   let isInteractive = $state(true);
 
   $effect(() => {
-    const nextInteractive = Boolean(interactive);
-    isInteractive = nextInteractive;
-    if (!nextInteractive) {
-      showFeedback = false;
-    }
+    isInteractive = Boolean(interactive);
   });
 
   onMount(() => {
@@ -38,9 +32,6 @@
       const detail = event.detail || {};
       if (!runId || detail.runId !== runId) return;
       isInteractive = Boolean(detail.interactive);
-      if (!isInteractive) {
-        showFeedback = false;
-      }
     };
     window.addEventListener("bds:deep-research-run-state", handler);
     return () => window.removeEventListener("bds:deep-research-run-state", handler);
@@ -64,16 +55,8 @@
   function handleRequestChanges(event) {
     stopNativeClick(event);
     if (!isInteractive) return;
-    showFeedback = true;
-  }
-
-  function handleSubmitFeedback(event) {
-    stopNativeClick(event);
-    if (!isInteractive) return;
     if (onRequestChanges) {
-      onRequestChanges(runId, feedbackText.trim());
-      feedbackText = "";
-      showFeedback = false;
+      onRequestChanges(runId);
     }
   }
 
@@ -137,19 +120,6 @@
       </div>
     {/if}
 
-    {#if isInteractive && showFeedback}
-      <div class="bds-dr-feedback">
-        <textarea
-          class="bds-dr-feedback-input"
-          placeholder="Describe what changes you want in the research plan..."
-          bind:value={feedbackText}
-          data-testid="dr-feedback-input"
-        ></textarea>
-        <button type="button" class="bds-dr-btn bds-dr-btn-submit" onpointerdown={stopNativePointer} onmousedown={stopNativePointer} onclick={handleSubmitFeedback} data-testid="dr-submit-feedback-btn">
-          Submit Feedback
-        </button>
-      </div>
-    {/if}
   {/if}
 </div>
 
@@ -262,26 +232,6 @@
   .bds-dr-btn-approve { color: #22c55e; }
   .bds-dr-btn-revise { color: var(--bds-accent, #4f8cff); }
   .bds-dr-btn-cancel { color: var(--bds-text-tertiary, rgba(255, 255, 255, 0.5)); }
-  .bds-dr-feedback {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 0 14px 12px;
-    background: var(--bds-bg-panel, #1e1f23);
-  }
-  .bds-dr-feedback-input {
-    width: 100%;
-    min-height: 64px;
-    padding: 8px;
-    border-radius: 6px;
-    border: 1px solid var(--bds-border, #3a3b3f);
-    font-size: 13px;
-    resize: vertical;
-    color: var(--bds-text-primary, #ececec);
-    background: var(--bds-bg-elevated, #25262b);
-    box-sizing: border-box;
-  }
-  .bds-dr-btn-submit { align-self: flex-end; }
   .bds-dr-error {
     padding: 10px 14px 12px;
     border-top: 1px solid var(--bds-border, #3a3b3f);

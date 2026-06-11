@@ -300,11 +300,12 @@ function findChatEditor() {
   return (
     document.querySelector("textarea#chat-input") ||
     document.querySelector(".ds-textarea textarea") ||
-    document.querySelector('[role="textbox"][contenteditable="true"]') ||
-    document.querySelector('.ProseMirror[contenteditable="true"]') ||
+    document.querySelector('[role="textbox"][contenteditable]') ||
+    document.querySelector('[role="textbox"]') ||
+    document.querySelector('.ProseMirror[contenteditable]') ||
     document.querySelector("textarea[placeholder]") ||
     document.querySelector("input[placeholder]") ||
-    document.querySelector('div[contenteditable="true"]')
+    document.querySelector("[contenteditable]")
   );
 }
 
@@ -396,7 +397,8 @@ export function setChatInputText(text) {
   const isContentEditable =
     editor.isContentEditable ||
     editor.contentEditable === "true" ||
-    editor.getAttribute("contenteditable") === "true";
+    editor.contentEditable === "plaintext-only" ||
+    editor.hasAttribute("contenteditable");
 
   if (isContentEditable) {
     const selection = window.getSelection?.();
