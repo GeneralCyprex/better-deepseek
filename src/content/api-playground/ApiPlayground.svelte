@@ -157,7 +157,7 @@
               <button type="button" class="bds-api-btn bds-api-btn-sm {store.activeKeyId === key.id ? 'bds-api-btn-primary' : ''}" onclick={() => store.setActiveKey(key.id)}>
                 {store.activeKeyId === key.id ? 'Active' : 'Use'}
               </button>
-              <button type="button" class="bds-api-btn bds-api-btn-sm bds-api-btn-danger" onclick={() => { if (confirm('Delete this key?')) { store.removeApiKey(key.id); addToast('Key deleted', 'info'); } }}>
+              <button type="button" class="bds-api-btn bds-api-btn-sm bds-api-btn-danger" onclick={() => { store.removeApiKey(key.id); addToast('Key deleted', 'info'); }}>
                 &#10005;
               </button>
             </div>
