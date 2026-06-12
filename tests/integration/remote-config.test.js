@@ -484,4 +484,34 @@ describe("AttachMenu config integration (DOM model switching)", () => {
   it("radio group with no checked radio returns instant", () => {
     expect(detectModelType()).toBe("instant");
   });
+
+  describe("model badge detection fallback", () => {
+    let badge;
+
+    beforeEach(() => {
+      radioGroup?.remove();
+      badge = document.createElement("div");
+      badge.className = "_46a12ab";
+      document.body.appendChild(badge);
+    });
+
+    afterEach(() => {
+      badge?.remove();
+    });
+
+    it("detects deepthink from English model badge text", () => {
+      badge.textContent = "DeepThink";
+      expect(detectModelType()).toBe("deepthink");
+    });
+
+    it("detects deepthink from R1 model badge text", () => {
+      badge.textContent = "DeepSeek R1";
+      expect(detectModelType()).toBe("deepthink");
+    });
+
+    it("detects expert from reasoner model badge text", () => {
+      badge.textContent = "deepseek-reasoner";
+      expect(detectModelType()).toBe("expert");
+    });
+  });
 });

@@ -381,6 +381,19 @@ function isAfterNode(reference, candidate) {
 }
 
 function isDeepThinkControl(control) {
+  // Match by class and SVG path (preferred, language-independent)
+  const hasToggleClass = control.classList?.contains("ds-toggle-button") || 
+                         control.querySelector?.(".ds-toggle-button");
+  if (hasToggleClass && control.querySelector?.('svg path[d*="M7.0643"]')) {
+    return true;
+  }
+
+  // Fallback to direct SVG path match
+  if (control.querySelector?.('svg path[d*="M7.0643"]')) {
+    return true;
+  }
+
+  // Fallback for test environments (English label text)
   const text = normalizePromptControlText(control.textContent);
   const label = normalizePromptControlText(
     `${control.getAttribute("aria-label") || ""} ${control.getAttribute("title") || ""}`,

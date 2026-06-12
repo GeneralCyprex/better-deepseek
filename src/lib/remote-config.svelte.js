@@ -158,7 +158,12 @@ export function detectModelType() {
       const text = (el.textContent || "").toLowerCase().trim();
       if (text === "expert" || text === "deepseek-reasoner") return "expert";
       if (text === "instant" || text === "deepseek-chat") return "instant";
-      if (text.includes("deepthink") || text.includes("deep think")) return "deepthink";
+      if (
+        text.includes("deepthink") ||
+        text.includes("deep think") ||
+        text.includes("reasoner") ||
+        text.includes("r1")
+      ) return "deepthink";
     }
   }
   return "instant";

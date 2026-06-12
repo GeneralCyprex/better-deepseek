@@ -229,4 +229,56 @@ describe("scanner input controls", () => {
     expect(deepResearchMount).toBeTruthy();
     expect(mountMock.mock.calls[0][0]).toBe(deepResearchToggleMock);
   });
+
+  it("mounts Deep Research in prompt action row when DeepThink is in Turkish ('Derin Düşünme' and class/SVG match)", async () => {
+    document.body.innerHTML = `
+      <div id="composer">
+        <textarea id="chat-input" placeholder="Mesaj Gönder"></textarea>
+        <div id="prompt-actions">
+          <button id="deepthink" class="ds-toggle-button" type="button">
+            <svg viewBox="0 0 14 14"><path d="M7.06431 5.93342C7.68763 5.93342 8.19307 6.43904 8.19322 7.06233"></path></svg>
+            Derin Düşünme
+          </button>
+        </div>
+        <div id="send-cluster">
+          <button id="send" title="Send message" type="button"></button>
+        </div>
+      </div>
+    `;
+    const { scanInputArea } = await import("../../src/content/scanner.js");
+
+    scanInputArea();
+
+    const promptActions = document.querySelector("#prompt-actions");
+    const deepResearchMount = promptActions.querySelector(".bds-deep-research-mount");
+
+    expect(deepResearchMount).toBeTruthy();
+    expect(mountMock.mock.calls[0][0]).toBe(deepResearchToggleMock);
+  });
+
+  it("mounts Deep Research in prompt action row when DeepThink is matched via SVG path", async () => {
+    document.body.innerHTML = `
+      <div id="composer">
+        <textarea id="chat-input" placeholder="Message"></textarea>
+        <div id="prompt-actions">
+          <button id="deepthink" type="button">
+            <svg viewBox="0 0 14 14"><path d="M7.06431 5.93342C7.68763 5.93342 8.19307 6.43904 8.19322 7.06233"></path></svg>
+            Some Random Text
+          </button>
+        </div>
+        <div id="send-cluster">
+          <button id="send" title="Send message" type="button"></button>
+        </div>
+      </div>
+    `;
+    const { scanInputArea } = await import("../../src/content/scanner.js");
+
+    scanInputArea();
+
+    const promptActions = document.querySelector("#prompt-actions");
+    const deepResearchMount = promptActions.querySelector(".bds-deep-research-mount");
+
+    expect(deepResearchMount).toBeTruthy();
+    expect(mountMock.mock.calls[0][0]).toBe(deepResearchToggleMock);
+  });
 });
