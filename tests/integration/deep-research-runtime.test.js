@@ -290,4 +290,274 @@ describe("Deep Research runtime events", () => {
     expect(run.execution.steps[0].status).toBe("send_failed");
     expect(run.execution.awaitingAnalysisStepId).toBeNull();
   });
+
+  it("executes adaptive steps before requesting final report", async () => {
+    // Mock search to return evidence
+    const evidenceText = "# Search evidence\n\nGood results.";
+    const evidenceFile = new File([evidenceText], "search.md", { type: "text/markdown" });
+    Object.defineProperty(evidenceFile, "text", {
+      value: vi.fn(() => Promise.resolve(evidenceText)),
+    });
+
+    readerMocks.searchWeb.mockResolvedValue({
+      query: "follow-up query",
+      deepFetch: 2,
+      results: [{ title: "Adaptive result", url: "https://example.com/adaptive", snippet: "adaptive finding" }],
+      provider: "mock",
+      rawResultCount: 1,
+      file: evidenceFile,
+    });
+
+    autoMocks.sendFileWithMessage.mockResolvedValue(true);
+
+    const state = (await import("../../src/content/state.js")).default;
+    const {
+      createRun,
+      initDeepResearchRuntime,
+      handleStepDone,
+    } = await import("../../src/content/deep-research.js");
+
+    const plan = {
+      title: "Adaptive Research",
+      steps: [{
+        id: 1,
+        action: "search",
+        query: "initial query",
+        purpose: "overview",
+        sourceType: "general",
+      }],
+    };
+    const run = createRun("conv1", "run-adaptive-exec");
+    run.plan = plan;
+    state.deepResearch.enabled = true;
+    state.deepResearch.runs = [run];
+
+    initDeepResearchRuntime();
+
+    // Approve to start managed execution
+    window.dispatchEvent(new CustomEvent("bds:deep-research-approve", {
+      detail: { runId: "run-adaptive-exec", plan },
+    }));
+
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Step 1 should be awaiting analysis
+    expect(run.execution.steps[0].status).toBe("awaiting_analysis");
+    expect(run.execution.steps).toHaveLength(1);
+
+    // Reset mock for the adaptive step
+    readerMocks.searchWeb.mockClear();
+    autoMocks.sendFileWithMessage.mockClear();
+
+    const adaptiveEvidenceFile = new File(["# Adaptive evidence"], "adaptive-search.md", { type: "text/markdown" });
+    Object.defineProperty(adaptiveEvidenceFile, "text", {
+      value: vi.fn(() => Promise.resolve("# Adaptive evidence")),
+    });
+    readerMocks.searchWeb.mockResolvedValue({
+      query: "adaptive follow-up",
+      deepFetch: 3,
+      results: [{ title: "Follow-up", url: "https://example.com/followup", snippet: "follow-up data" }],
+      provider: "mock",
+      rawResultCount: 1,
+      file: adaptiveEvidenceFile,
+    });
+
+    // Ensure run is still in the array (loadRuns may have cleared it)
+    if (!state.deepResearch.runs.find((r) => r.id === run.id)) {
+      state.deepResearch.runs.push(run);
+    }
+
+    // Send step-done with adaptive nextSteps
+    window.dispatchEvent(new CustomEvent("bds:deep-research-step-done", {
+      detail: {
+        conversationId: "conv1",
+        runId: "run-adaptive-exec",
+        stepId: "1",
+        analysis: {
+          stepId: "1",
+          analysis: "found gap",
+          newInsights: ["need follow-up"],
+          nextSteps: [
+            { action: "search", query: "adaptive follow-up", purpose: "fill gap", sourceType: "academic", deepFetch: 3 },
+          ],
+        },
+      },
+    }));
+
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Adaptive step should have been inserted and executed
+    expect(run.execution.steps).toHaveLength(2);
+    expect(run.execution.steps[0].status).toBe("complete");
+    expect(run.execution.steps[1].id).toBe("a1");
+    expect(run.execution.steps[1].adaptive).toBe(true);
+    expect(run.execution.steps[1].parentStepId).toBe("1");
+    // The adaptive step should have been run and sent for analysis
+    expect(run.execution.steps[1].status).toBe("awaiting_analysis");
+    // Final report should NOT be requested yet (adaptive step pending)
+    expect(run.execution.reportRequested).toBe(false);
+  });
+
+  it("requests final report after adaptive steps complete when at last original step", async () => {
+    const evidenceText = "# Search evidence";
+    const evidenceFile = new File([evidenceText], "search.md", { type: "text/markdown" });
+    Object.defineProperty(evidenceFile, "text", {
+      value: vi.fn(() => Promise.resolve(evidenceText)),
+    });
+
+    readerMocks.searchWeb.mockResolvedValue({
+      query: "test",
+      deepFetch: 3,
+      results: [{ title: "Test", url: "https://example.com/test", snippet: "test" }],
+      provider: "mock",
+      rawResultCount: 1,
+      file: evidenceFile,
+    });
+
+    autoMocks.sendFileWithMessage.mockResolvedValue(true);
+    autoMocks.injectPureTextAndSend.mockReturnValue(true);
+
+    const state = (await import("../../src/content/state.js")).default;
+    const {
+      createRun,
+      initDeepResearchRuntime,
+    } = await import("../../src/content/deep-research.js");
+
+    const plan = {
+      title: "Single Step Research",
+      steps: [{
+        id: 1,
+        action: "search",
+        query: "only step",
+        purpose: "overview",
+        sourceType: "general",
+      }],
+    };
+    const run = createRun("conv1", "run-last-step-adaptive");
+    run.plan = plan;
+    state.deepResearch.enabled = true;
+    state.deepResearch.runs = [run];
+
+    initDeepResearchRuntime();
+
+    window.dispatchEvent(new CustomEvent("bds:deep-research-approve", {
+      detail: { runId: "run-last-step-adaptive", plan },
+    }));
+
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Step 1 is the last and only step, awaiting analysis
+    expect(run.execution.steps[0].status).toBe("awaiting_analysis");
+
+    // Ensure run is still in the array (loadRuns may have cleared it)
+    if (!state.deepResearch.runs.find((r) => r.id === run.id)) {
+      state.deepResearch.runs.push(run);
+    }
+
+    // Send step-done WITHOUT adaptive nextSteps (normal completion)
+    window.dispatchEvent(new CustomEvent("bds:deep-research-step-done", {
+      detail: {
+        conversationId: "conv1",
+        runId: "run-last-step-adaptive",
+        stepId: "1",
+        analysis: {
+          stepId: "1",
+          analysis: "done",
+          newInsights: [],
+        },
+      },
+    }));
+
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // With no adaptive steps and last step complete, final report should be requested
+    expect(run.execution.reportRequested).toBe(true);
+    expect(run.status).toBe("reporting");
+  });
+
+  it("existing no-adaptive runs still behave as before (regression)", async () => {
+    const evidenceText = "# Search evidence\n\nResults here.";
+    const evidenceFile = new File([evidenceText], "search.md", { type: "text/markdown" });
+    Object.defineProperty(evidenceFile, "text", {
+      value: vi.fn(() => Promise.resolve(evidenceText)),
+    });
+    readerMocks.searchWeb.mockResolvedValue({
+      query: "gaming laptop reviews",
+      deepFetch: 3,
+      results: [{ title: "Review", url: "https://example.com/review", snippet: "Good evidence" }],
+      provider: "mock",
+      rawResultCount: 1,
+      file: evidenceFile,
+    });
+
+    autoMocks.sendFileWithMessage.mockResolvedValue(true);
+
+    const state = (await import("../../src/content/state.js")).default;
+    const {
+      createRun,
+      initDeepResearchRuntime,
+    } = await import("../../src/content/deep-research.js");
+
+    const plan = {
+      title: "Standard Research",
+      steps: [{
+        id: 1,
+        action: "search",
+        query: "gaming laptop reviews",
+        purpose: "collect review evidence",
+        sourceType: "reviews",
+      }],
+    };
+    const run = createRun("conv1", "run-no-adaptive-regression");
+    run.plan = plan;
+    state.deepResearch.enabled = true;
+    state.deepResearch.runs = [run];
+
+    initDeepResearchRuntime();
+
+    window.dispatchEvent(new CustomEvent("bds:deep-research-approve", {
+      detail: { runId: "run-no-adaptive-regression", plan },
+    }));
+
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(readerMocks.searchWeb).toHaveBeenCalled();
+    expect(run.execution.steps[0].status).toBe("awaiting_analysis");
+    expect(run.execution.steps).toHaveLength(1);
+    expect(run.execution.adaptiveStepCounter).toBe(0);
+
+    // Ensure run is still in the array (loadRuns may have cleared it)
+    if (!state.deepResearch.runs.find((r) => r.id === run.id)) {
+      state.deepResearch.runs.push(run);
+    }
+
+    // Step-done without nextSteps
+    window.dispatchEvent(new CustomEvent("bds:deep-research-step-done", {
+      detail: {
+        conversationId: "conv1",
+        runId: "run-no-adaptive-regression",
+        stepId: "1",
+        analysis: { stepId: "1", analysis: "done", newInsights: [] },
+      },
+    }));
+
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // No adaptive steps, last step complete, report should be requested
+    expect(run.execution.reportRequested).toBe(true);
+    expect(run.execution.steps).toHaveLength(1);
+    expect(run.execution.steps[0].status).toBe("complete");
+  });
 });

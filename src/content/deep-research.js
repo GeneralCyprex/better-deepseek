@@ -55,13 +55,15 @@ export function createRun(conversationId, id = makeId()) {
     /** Managed execution state — when true, BDS drives step-by-step */
     execution: {
       managed: false,
-      /** Normalized steps from the approved plan */
+      /** Normalized steps from the approved plan (includes adaptive steps) */
       steps: [],
       currentStepIndex: -1,
       /** The step ID we are waiting for analysis on */
       awaitingAnalysisStepId: null,
       /** Whether the final report prompt has been sent */
       reportRequested: false,
+      /** Monotonic counter for generating adaptive step IDs (a1, a2, ...) */
+      adaptiveStepCounter: 0,
     },
   };
 }
@@ -170,6 +172,12 @@ const TEXT_ONLY_STEP_PROMPT_CHARS = 9_000;
 const TEXT_ONLY_FALLBACK_CHARS = 4_500;
 const TEXT_ONLY_EMERGENCY_CHARS = 2_000;
 
+/** Adaptive step expansion limits */
+const MAX_ADAPTIVE_STEPS_PER_STEP = 3;
+const MAX_TOTAL_MANAGED_STEPS = 12;
+const VALID_SOURCE_TYPES = ["general", "docs", "news", "reviews", "academic", "commerce"];
+const VALID_ADAPTIVE_ACTIONS = ["search", "fetch"];
+
 const PROMPT_DETAIL = {
   full: { sources: 6, snippetChars: 260, excerptChars: 900, queryChars: 700, purposeChars: 400 },
   fallback: { sources: 4, snippetChars: 140, excerptChars: 420, queryChars: 420, purposeChars: 240 },
@@ -180,6 +188,66 @@ function clampDeepFetch(value) {
   const num = parseInt(value, 10);
   if (isNaN(num) || num < 0) return DEEP_FETCH_DEFAULT;
   return Math.min(num, MAX_DEEP_FETCH);
+}
+
+function normalizeSourceType(raw) {
+  const normalized = String(raw || "").trim().toLowerCase();
+  return VALID_SOURCE_TYPES.includes(normalized) ? normalized : "general";
+}
+
+function isHttpUrl(str) {
+  return /^https?:\/\/.+/i.test(String(str || "").trim());
+}
+
+/**
+ * Validate and normalize a single adaptive step proposal.
+ * Returns null if the step is invalid, duplicate, or unsupported.
+ * @param {object} rawStep - The raw adaptive step from model output
+ * @param {Array} existingSteps - All current execution steps for dedup
+ * @param {number} adapterCounter - Current adaptive step counter
+ * @returns {object|null} Normalized adaptive step or null
+ */
+function validateAdaptiveStep(rawStep, existingSteps, adapterCounter) {
+  if (!rawStep || typeof rawStep !== "object") return null;
+
+  const action = String(rawStep.action || "").trim().toLowerCase();
+  if (!VALID_ADAPTIVE_ACTIONS.includes(action)) return null;
+
+  const query = String(rawStep.query || "").trim();
+  if (!query) return null;
+
+  // Fetch steps must target HTTP(S) URLs
+  if (action === "fetch" && !isHttpUrl(query)) return null;
+
+  // Deduplicate against all existing steps by normalized action + query
+  const normalizedQuery = action === "fetch" ? normalizeHttpUrl(query) : query;
+  for (const existing of existingSteps) {
+    const existingQuery = existing.action === "fetch" && existing.query
+      ? normalizeHttpUrl(existing.query)
+      : existing.query;
+    if (existing.action === action && existingQuery === normalizedQuery) {
+      return null;
+    }
+  }
+
+  const purpose = String(rawStep.purpose || "").trim();
+  const sourceType = action === "search" ? normalizeSourceType(rawStep.sourceType) : "";
+  const deepFetch = action === "search" ? clampDeepFetch(rawStep.deepFetch ?? DEEP_FETCH_DEFAULT) : 0;
+
+  return {
+    id: `a${adapterCounter + 1}`,
+    action,
+    query: normalizedQuery,
+    purpose,
+    sourceType,
+    deepFetch,
+    status: "pending",
+    outcome: null,
+    error: null,
+    resultFile: null,
+    adaptive: true,
+    parentStepId: null,
+  };
 }
 
 function limitText(value, maxChars) {
@@ -275,6 +343,8 @@ function emitRunState(run) {
         deepFetch: s.deepFetch,
         status: s.status,
         error: s.error,
+        adaptive: Boolean(s.adaptive),
+        parentStepId: s.parentStepId || null,
       })) : [],
     },
   }));
@@ -302,6 +372,7 @@ function serializeRun(run) {
       currentStepIndex: Number(exec.currentStepIndex ?? -1),
       awaitingAnalysisStepId: exec.awaitingAnalysisStepId || null,
       reportRequested: Boolean(exec.reportRequested),
+      adaptiveStepCounter: Number(exec.adaptiveStepCounter ?? 0),
     } : undefined,
   };
 }
@@ -321,6 +392,8 @@ function serializeStep(step) {
     status: step.status || "pending",
     outcome: step.outcome || null,
     error: step.error || null,
+    adaptive: Boolean(step.adaptive),
+    parentStepId: step.parentStepId || null,
   };
 }
 
@@ -346,12 +419,14 @@ function deserializeRun(raw) {
       currentStepIndex: Number(rawExec.currentStepIndex ?? -1),
       awaitingAnalysisStepId: rawExec.awaitingAnalysisStepId || null,
       reportRequested: Boolean(rawExec.reportRequested),
+      adaptiveStepCounter: Number(rawExec.adaptiveStepCounter ?? 0),
     } : {
       managed: false,
       steps: [],
       currentStepIndex: -1,
       awaitingAnalysisStepId: null,
       reportRequested: false,
+      adaptiveStepCounter: 0,
     },
   };
 }
@@ -370,6 +445,8 @@ function deserializeStep(raw) {
     status: raw.status || "pending",
     outcome: raw.outcome || null,
     error: raw.error || null,
+    adaptive: Boolean(raw.adaptive),
+    parentStepId: raw.parentStepId || null,
   };
 }
 
@@ -698,6 +775,10 @@ function buildStepPromptFooter(runId, stepId) {
     ``,
     `The JSON inside must be: {"stepId":"${stepId}","analysis":"short summary of findings","newInsights":["insight1","insight2"]}`,
     ``,
+    `If you discover material gaps, contradictions, newly discovered named entities, missing source classes, or need recency checks, add up to 3 focused follow-up steps via an optional "nextSteps" array:`,
+    `{"stepId":"${stepId}","analysis":"...","newInsights":["..."],"nextSteps":[{"action":"search","query":"specific follow-up query","purpose":"why this gap matters","sourceType":"academic","deepFetch":3}]}`,
+    `nextStep actions: "search" or "fetch". Fetch queries must be HTTP(S) URLs. sourceType for searches: general, docs, news, reviews, academic, commerce (default: general). Only add nextSteps for material gaps — avoid unnecessary expansion.`,
+    ``,
     `Do NOT produce the final report yet. Only analyze this step.`,
     `</BetterDeepSeek>`,
   ];
@@ -865,7 +946,8 @@ function buildFinalReportPrompt(run) {
   const runId = run.id;
 
   const stepSummaries = run.execution.steps.map((s) => {
-    const header = `Step ${s.id}: ${s.action} "${s.query}" (${s.purpose})`;
+    const adaptiveLabel = s.adaptive ? ` [adaptive follow-up from step ${s.parentStepId || "?"}]` : "";
+    const header = `Step ${s.id}: ${s.action} "${s.query}" (${s.purpose})${adaptiveLabel}`;
     if (s.error) return `${header} — FAILED: ${s.error}`;
     return `${header} — complete`;
   }).join("\n");
@@ -933,8 +1015,63 @@ async function requestFinalReport(run) {
 }
 
 /**
+ * Validate and insert adaptive follow-up steps proposed by the model.
+ * Steps are validated, deduplicated, and inserted immediately after the
+ * completed step. Capped at MAX_ADAPTIVE_STEPS_PER_STEP (3) per step
+ * and MAX_TOTAL_MANAGED_STEPS (12) total per run.
+ * @param {object} run
+ * @param {Array} nextSteps - Raw adaptive step proposals from model
+ * @param {string} parentStepId - The step ID that discovered these gaps
+ */
+function processAdaptiveSteps(run, nextSteps, parentStepId) {
+  if (!Array.isArray(nextSteps) || nextSteps.length === 0) return;
+  const exec = run.execution;
+
+  // Enforce total step cap
+  if (exec.steps.length >= MAX_TOTAL_MANAGED_STEPS) return;
+
+  // Initialize counter if needed (backward compat with deserialized runs)
+  if (exec.adaptiveStepCounter == null) exec.adaptiveStepCounter = 0;
+
+  const accepted = [];
+  const remainingSlots = MAX_TOTAL_MANAGED_STEPS - exec.steps.length;
+  const allowedCount = Math.min(MAX_ADAPTIVE_STEPS_PER_STEP, remainingSlots);
+
+  for (const rawStep of nextSteps) {
+    if (accepted.length >= allowedCount) break;
+    const valid = validateAdaptiveStep(rawStep, exec.steps, exec.adaptiveStepCounter);
+    if (valid) {
+      valid.parentStepId = parentStepId;
+      exec.adaptiveStepCounter++;
+      accepted.push(valid);
+    }
+  }
+
+  if (accepted.length === 0) return;
+
+  // Insert adaptive steps right after the current step
+  const insertIdx = exec.currentStepIndex + 1;
+  exec.steps.splice(insertIdx, 0, ...accepted);
+
+  // Mirror accepted adaptive steps into run.plan.steps so UI/state reflect the evolving plan
+  if (run.plan && Array.isArray(run.plan.steps)) {
+    run.plan.steps.splice(insertIdx, 0, ...accepted.map((s) => ({
+      id: s.id,
+      action: s.action,
+      query: s.query,
+      purpose: s.purpose,
+      sourceType: s.sourceType,
+      deepFetch: s.deepFetch,
+    })));
+  }
+
+  run.updatedAt = Date.now();
+}
+
+/**
  * Handle a received DEEP_RESEARCH_STEP_DONE tag.
  * Only advances if the runId and stepId match the expected values.
+ * Processes adaptive nextSteps if present in the analysis JSON.
  * @param {object} run
  * @param {string} stepId
  * @param {object} analysisJson
@@ -965,6 +1102,11 @@ export function handleStepDone(run, stepId, analysisJson) {
       analysis: analysisJson.analysis || "",
       insights: analysisJson.newInsights || [],
     });
+
+    // Process adaptive nextSteps proposed by the model
+    if (Array.isArray(analysisJson.nextSteps) && analysisJson.nextSteps.length > 0) {
+      processAdaptiveSteps(run, analysisJson.nextSteps, stepId);
+    }
   }
   run.updatedAt = Date.now();
 

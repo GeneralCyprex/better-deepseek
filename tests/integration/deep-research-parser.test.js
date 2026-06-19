@@ -182,6 +182,30 @@ Findings.</BDS:DEEP_RESEARCH_REPORT>`;
       expect(result.deepResearch.stepDone).toHaveLength(1);
       expect(result.deepResearch.stepDone[0].runId).toBe("runX");
     });
+
+    it("parses nextSteps in step-done JSON for adaptive expansion", () => {
+      const text = `<BDS:DEEP_RESEARCH_STEP_DONE runId="run1" stepId="1">{"stepId":"1","analysis":"found gaps","newInsights":["need more data"],"nextSteps":[{"action":"search","query":"follow-up specific query","purpose":"fill gap","sourceType":"academic","deepFetch":3}]}</BDS:DEEP_RESEARCH_STEP_DONE>`;
+      const result = parseBdsMessage(text);
+
+      expect(result.deepResearch.stepDone).toHaveLength(1);
+      expect(result.deepResearch.stepDone[0].analysis.nextSteps).toHaveLength(1);
+      expect(result.deepResearch.stepDone[0].analysis.nextSteps[0].action).toBe("search");
+      expect(result.deepResearch.stepDone[0].analysis.nextSteps[0].query).toBe("follow-up specific query");
+      expect(result.deepResearch.stepDone[0].analysis.nextSteps[0].purpose).toBe("fill gap");
+      expect(result.deepResearch.stepDone[0].analysis.nextSteps[0].sourceType).toBe("academic");
+      expect(result.deepResearch.stepDone[0].analysis.nextSteps[0].deepFetch).toBe(3);
+    });
+
+    it("malformed nextSteps does not break step-done parsing", () => {
+      // nextSteps contains invalid entries but the JSON itself is valid
+      const text = `<BDS:DEEP_RESEARCH_STEP_DONE runId="run1" stepId="1">{"stepId":"1","analysis":"ok","newInsights":[],"nextSteps":[{"action":"invalid","query":""}]}</BDS:DEEP_RESEARCH_STEP_DONE>`;
+      const result = parseBdsMessage(text);
+
+      expect(result.deepResearch.stepDone).toHaveLength(1);
+      expect(result.deepResearch.stepDone[0].analysis).toBeTruthy();
+      expect(result.deepResearch.stepDone[0].analysis.nextSteps).toHaveLength(1);
+      expect(result.deepResearch.stepDone[0].analysis.analysis).toBe("ok");
+    });
   });
 
   describe("Multiple deep research tags in one message", () => {
