@@ -21,6 +21,7 @@ import { collectLongWorkFiles, finalizeLongWork, emitZipForFiles } from "./files
 import { emitStandaloneFiles } from "./files/standalone.js";
 import { getOrCreateHost } from "./dom/host.js";
 import { handleAutoWebFetch, handleAutoGitHubFetch, handleAutoTwitterFetch, handleAutoYouTubeFetch, handleAutoSearch, handleAutoSearchForRun } from "./auto.js";
+import { handleManagedAutoContinuation, isManagedRunActive, trySynthesizeReport } from "./deep-research.js";
 
 import { mount, unmount } from "svelte";
 import MessageOverlay from "./ui/MessageOverlay.svelte";
@@ -33,6 +34,20 @@ const nodeStates = new WeakMap();
 const userMsgCleaned = new WeakSet();
 const readMessages = new WeakSet();
 const processedSearchResultCards = new WeakSet();
+
+function normalizeSearchKeyPart(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function getSearchRequestKey(query, runId, purpose, sourceType) {
+  const baseKey = runId ? `${runId}\n${normalizeSearchKeyPart(query)}` : normalizeSearchKeyPart(query);
+  const normalizedPurpose = normalizeSearchKeyPart(purpose);
+  const normalizedSourceType = normalizeSearchKeyPart(sourceType);
+  if (!normalizedPurpose && !normalizedSourceType) {
+    return baseKey;
+  }
+  return [baseKey, normalizedPurpose, normalizedSourceType].join("\n");
+}
 
 function getNodeState(node) {
   let s = nodeStates.get(node);
@@ -219,6 +234,9 @@ export function processMessageNode(node) {
     parsed.autoRequests.twitterFetch.length > 0 ||
     parsed.autoRequests.youtubeFetch.length > 0 ||
     parsed.autoRequests.searchQueries.length > 0;
+  const currentConversationId = getCurrentConversationIdInline();
+  const managedAutoSuppressionRun = getManagedAutoSuppressionRun(parsed, currentConversationId);
+  const suppressManagedAuto = Boolean(managedAutoSuppressionRun);
 
   if (isLatestAssistant && autoRequestsAvailable) {
     // isSystemGenerating() checks for the stop button (square SVG icon).
@@ -232,7 +250,9 @@ export function processMessageNode(node) {
       if (!stateData.autoYouTubeFetchesHandled) stateData.autoYouTubeFetchesHandled = new Set();
       if (!stateData.autoSearchQueriesHandled) stateData.autoSearchQueriesHandled = new Set();
 
+      // Stray AUTO tags are treated as continuation attempts and recovered below.
       for (const url of parsed.autoRequests.webFetch) {
+        if (suppressManagedAuto) continue;
         if (!stateData.autoWebFetchesHandled.has(url)) {
           stateData.autoWebFetchesHandled.add(url);
           handleAutoWebFetch(url);
@@ -240,6 +260,7 @@ export function processMessageNode(node) {
       }
 
       for (const repoUrl of parsed.autoRequests.githubFetch) {
+        if (suppressManagedAuto) continue;
         if (!stateData.autoGitHubFetchesHandled.has(repoUrl)) {
           stateData.autoGitHubFetchesHandled.add(repoUrl);
           handleAutoGitHubFetch(repoUrl);
@@ -247,6 +268,7 @@ export function processMessageNode(node) {
       }
 
       for (const tweetUrl of parsed.autoRequests.twitterFetch) {
+        if (suppressManagedAuto) continue;
         if (!stateData.autoTwitterFetchesHandled.has(tweetUrl)) {
           stateData.autoTwitterFetchesHandled.add(tweetUrl);
           handleAutoTwitterFetch(tweetUrl);
@@ -254,21 +276,34 @@ export function processMessageNode(node) {
       }
 
       for (const videoUrl of parsed.autoRequests.youtubeFetch) {
+        if (suppressManagedAuto) continue;
         if (!stateData.autoYouTubeFetchesHandled.has(videoUrl)) {
           stateData.autoYouTubeFetchesHandled.add(videoUrl);
           handleAutoYouTubeFetch(videoUrl);
         }
       }
 
-      for (const { query, deepFetch, runId } of parsed.autoRequests.searchQueries) {
-        const searchKey = runId ? `${runId}\n${query}` : query;
+      for (const { query, deepFetch, runId, purpose, sourceType } of parsed.autoRequests.searchQueries) {
+        if (suppressManagedAuto) continue;
+        const searchKey = getSearchRequestKey(query, runId, purpose, sourceType);
         if (!stateData.autoSearchQueriesHandled.has(searchKey)) {
           stateData.autoSearchQueriesHandled.add(searchKey);
           if (runId) {
-            handleAutoSearchForRun(query, deepFetch, runId);
+            handleAutoSearchForRun(query, deepFetch, runId, { purpose, sourceType });
           } else {
-            handleAutoSearch(query, deepFetch);
+            handleAutoSearch(query, deepFetch, { purpose, sourceType });
           }
+        }
+      }
+
+      if (
+        suppressManagedAuto &&
+        !parsed.deepResearch.stepDone.length &&
+        !stateData.managedAutoContinuationHandled
+      ) {
+        const handled = handleManagedAutoContinuation(managedAutoSuppressionRun, parsed.visibleText);
+        if (handled) {
+          stateData.managedAutoContinuationHandled = true;
         }
       }
     } else if (!stateData.autoTimer) {
@@ -289,8 +324,51 @@ export function processMessageNode(node) {
 
   const hasActionableFiles = parsed.createFiles.length > 0;
 
-  dispatchDeepResearchEvents(parsed, stateData);
-  
+  const deepResearchEventsAvailable = hasDeepResearchEvents(parsed);
+  if (deepResearchEventsAvailable && role === "assistant" && isLatestAssistant) {
+    if (!isSystemGenerating()) {
+      if (stateData.deepResearchTimer) {
+        clearTimeout(stateData.deepResearchTimer);
+        stateData.deepResearchTimer = null;
+      }
+      dispatchDeepResearchEvents(parsed, stateData);
+    } else if (!stateData.deepResearchTimer) {
+      stateData.deepResearchTimer = setTimeout(() => {
+        stateData.deepResearchTimer = null;
+        scheduleScan();
+      }, 3000);
+    }
+  }
+  gateManagedDeepResearchReports(parsed);
+  gateSuppressedManagedAutoBlocks(parsed, suppressManagedAuto);
+
+  // --- SYNTHESIZE REPORT for managed deep research ---
+  // If we are in the reporting phase and the latest settled assistant message
+  // has no report tag, synthesize a report from visible markdown.
+  if (isLatestAssistant && isSettled && role === "assistant") {
+    const drRuns = state.deepResearch.runs;
+    for (const run of drRuns) {
+      if (run.execution && run.execution.managed &&
+          run.conversationId === currentConversationId &&
+          run.execution.reportRequested &&
+          run.status === "reporting") {
+        const hasReportTag = parsed.deepResearch.reports.length > 0;
+        if (!hasReportTag && parsed.visibleText && parsed.visibleText.trim()) {
+          const synthesized = trySynthesizeReport(run, parsed.visibleText);
+          if (synthesized) {
+            // Inject a synthetic renderable block so the UI renders DeepResearchReportCard
+            parsed.renderableBlocks.push({
+              name: "deep_research_report",
+              attrs: { runId: run.id },
+              content: parsed.visibleText,
+            });
+            parsed.containsControlTags = true;
+          }
+        }
+      }
+    }
+  }
+
   // IMMEDIATELY activate longWork state if tag is seen in latest assistant message
   if (isLatestAssistant && (parsed.longWorkOpen || (parsed.isStreamingTool && parsed.streamingTagName === 'long_work'))) {
     if (!state.longWork.active) {
@@ -459,6 +537,80 @@ export function processMessageNode(node) {
   }
 }
 
+function hasAnyAutoRequest(parsed) {
+  return Boolean(
+    parsed?.autoRequests?.webFetch?.length ||
+    parsed?.autoRequests?.githubFetch?.length ||
+    parsed?.autoRequests?.twitterFetch?.length ||
+    parsed?.autoRequests?.youtubeFetch?.length ||
+    parsed?.autoRequests?.searchQueries?.length
+  );
+}
+
+function isActiveManagedRun(run) {
+  return Boolean(
+    run?.execution?.managed &&
+    run.status !== "complete" &&
+    run.status !== "cancelled"
+  );
+}
+
+function getManagedAutoSuppressionRun(parsed, conversationId) {
+  if (!hasAnyAutoRequest(parsed)) return null;
+
+  const activeConversationRun = state.deepResearch.runs.find(
+    (run) => run.conversationId === conversationId && isActiveManagedRun(run),
+  );
+  if (activeConversationRun) return activeConversationRun;
+
+  for (const { runId } of parsed.autoRequests.searchQueries || []) {
+    if (!runId || !isManagedRunActive(runId)) continue;
+    const run = state.deepResearch.runs.find((item) => item.id === runId);
+    if (run && isActiveManagedRun(run)) return run;
+  }
+
+  return null;
+}
+
+function gateSuppressedManagedAutoBlocks(parsed, shouldSuppress) {
+  if (!shouldSuppress || !parsed?.renderableBlocks?.length) return;
+
+  parsed.renderableBlocks = parsed.renderableBlocks.filter((block) =>
+    block.name !== "auto:search" &&
+    block.name !== "auto:request_web_fetch" &&
+    block.name !== "auto:request_github_fetch"
+  );
+}
+
+function gateManagedDeepResearchReports(parsed) {
+  if (!parsed?.renderableBlocks?.length) return;
+
+  parsed.renderableBlocks = parsed.renderableBlocks.filter((block) => {
+    if (block.name !== "deep_research_report") return true;
+
+    const runId = block.attrs?.runId || block.attrs?.runid || "";
+    const run = state.deepResearch.runs.find((item) => item.id === runId);
+    if (!run?.execution?.managed) return true;
+    if (run.status === "complete") return true;
+
+    const steps = run.execution.steps || [];
+    const stepsComplete = steps.every((step) => step.status === "complete");
+    return Boolean(run.execution.reportRequested && stepsComplete);
+  });
+}
+
+function hasDeepResearchEvents(parsed) {
+  const data = parsed && parsed.deepResearch;
+  if (!data) return false;
+
+  return (
+    data.plans.length > 0 ||
+    data.statuses.length > 0 ||
+    data.reports.length > 0 ||
+    data.stepDone.length > 0
+  );
+}
+
 /**
  * Read computed font/color styles from DeepSeek's native .ds-markdown
  * and apply them as inline styles on the overlay host so the overlay
@@ -486,11 +638,7 @@ function dispatchDeepResearchEvents(parsed, stateData) {
   const data = parsed && parsed.deepResearch;
   if (!data) return;
 
-  const hasDeepResearch =
-    data.plans.length > 0 ||
-    data.statuses.length > 0 ||
-    data.reports.length > 0;
-  if (!hasDeepResearch) return;
+  if (!hasDeepResearchEvents(parsed)) return;
 
   const signature = simpleHash(JSON.stringify(data));
   if (stateData.deepResearchSignature === signature) return;
@@ -528,6 +676,19 @@ function dispatchDeepResearchEvents(parsed, stateData) {
         conversationId,
         runId: item.runId,
         markdown: item.markdown,
+      },
+    }));
+  }
+
+  for (const item of data.stepDone) {
+    window.dispatchEvent(new CustomEvent("bds:deep-research-step-done", {
+      detail: {
+        conversationId,
+        runId: item.runId,
+        stepId: item.stepId,
+        analysis: item.analysis,
+        raw: item.raw || "",
+        error: item.error || "",
       },
     }));
   }
@@ -1166,4 +1327,3 @@ function cleanupUserMessageCollapse(node, stateData, textContainer) {
     stateData.expandBtn = null;
   }
 }
-

@@ -29,6 +29,20 @@ const processedSearchQueries = new Set();
 // Per-run search deduplication for deep research
 const processedRunSearchQueries = new Map();
 
+function normalizeSearchKeyPart(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function getSearchDedupeKey(query, options = {}) {
+  const baseKey = normalizeSearchKeyPart(query);
+  const purpose = normalizeSearchKeyPart(options.purpose);
+  const sourceType = normalizeSearchKeyPart(options.sourceType);
+  if (!purpose && !sourceType) {
+    return baseKey;
+  }
+  return [baseKey, purpose, sourceType].join("\n");
+}
+
 export async function handleAutoWebFetch(url) {
   let targetUrl;
   try {
@@ -148,25 +162,32 @@ export async function handleAutoYouTubeFetch(url) {
  * Handles automatic web search requests via DuckDuckGo Lite.
  * @param {string} query - Search query
  * @param {number} [deepFetch=0] - Number of top results to also fetch full content for
+ * @param {{ purpose?: string, sourceType?: "general"|"docs"|"news"|"reviews"|"academic"|"commerce" }} [options]
  */
-export async function handleAutoSearch(query, deepFetch = 0) {
-  const q = query.trim();
-  if (processedSearchQueries.has(q)) return;
-  processedSearchQueries.add(q);
+export async function handleAutoSearch(query, deepFetch = 0, options = {}) {
+  const q = normalizeSearchKeyPart(query);
+  const dedupeKey = getSearchDedupeKey(q, options);
+  if (processedSearchQueries.has(dedupeKey)) return;
+  processedSearchQueries.add(dedupeKey);
 
   console.log(`[BDS:AUTO] Starting automatic search for: ${q}${deepFetch > 0 ? ` (deepFetch=${deepFetch})` : ""}`);
 
   try {
     const result = await searchWeb(q, deepFetch, (status) => {
       console.log(`[BDS:AUTO] Search Status: ${status}`);
-    });
+    }, options);
 
     if (result.file) {
       const payload = JSON.stringify({
         query: result.query,
         deepFetch: result.deepFetch,
         count: result.results.length,
-        results: result.results
+        results: result.results,
+        provider: result.provider,
+        effectiveQuery: result.effectiveQuery,
+        rawResultCount: result.rawResultCount,
+        purpose: options.purpose,
+        sourceType: options.sourceType,
       });
       const autoMessage = [
         `<BetterDeepSeek>`,
@@ -192,27 +213,29 @@ export async function handleAutoSearch(query, deepFetch = 0) {
  * @param {string} query - Search query
  * @param {number} [deepFetch=0] - Number of top results to also fetch full content for
  * @param {string} runId - Deep research run ID
+ * @param {{ purpose?: string, sourceType?: "general"|"docs"|"news"|"reviews"|"academic"|"commerce" }} [options]
  */
-export async function handleAutoSearchForRun(query, deepFetch = 0, runId = "") {
-  const q = query.trim();
+export async function handleAutoSearchForRun(query, deepFetch = 0, runId = "", options = {}) {
+  const q = normalizeSearchKeyPart(query);
+  const dedupeKey = getSearchDedupeKey(q, options);
   if (!runId) {
     // Fallback to global dedupe
-    return handleAutoSearch(q, deepFetch);
+    return handleAutoSearch(q, deepFetch, options);
   }
 
   if (!processedRunSearchQueries.has(runId)) {
     processedRunSearchQueries.set(runId, new Set());
   }
   const runSet = processedRunSearchQueries.get(runId);
-  if (runSet.has(q)) return;
-  runSet.add(q);
+  if (runSet.has(dedupeKey)) return;
+  runSet.add(dedupeKey);
 
   console.log(`[BDS:AUTO] Starting run-scoped search for: ${q} (runId=${runId}, deepFetch=${deepFetch})`);
 
   try {
     const result = await searchWeb(q, deepFetch, (status) => {
       console.log(`[BDS:AUTO] Search Status: ${status}`);
-    });
+    }, options);
 
     if (result.file) {
       const payload = JSON.stringify({
@@ -220,6 +243,11 @@ export async function handleAutoSearchForRun(query, deepFetch = 0, runId = "") {
         deepFetch: result.deepFetch,
         count: result.results.length,
         results: result.results,
+        provider: result.provider,
+        effectiveQuery: result.effectiveQuery,
+        rawResultCount: result.rawResultCount,
+        purpose: options.purpose,
+        sourceType: options.sourceType,
         runId,
       });
       const autoMessage = [
@@ -320,8 +348,31 @@ export function injectPureTextAndSend(autoMessage, logLabel = "Text prompt") {
     return false;
   }
 
-  sendCurrentChatInput(logLabel);
-  return true;
+  return sendCurrentChatInput(logLabel);
+}
+
+async function readFileText(file) {
+  if (!file) return "";
+
+  if (typeof file.text === "function") {
+    return await file.text();
+  }
+
+  if (typeof file.arrayBuffer === "function") {
+    const buffer = await file.arrayBuffer();
+    return new TextDecoder("utf-8", { fatal: false }).decode(buffer);
+  }
+
+  if (typeof FileReader !== "undefined") {
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(file);
+    });
+  }
+
+  return "";
 }
 
 function findChatEditor() {
@@ -470,87 +521,347 @@ export function setChatInputText(text) {
   return false;
 }
 
+const SEND_INITIAL_DELAY_MS = 500;
+const SEND_RETRY_DELAY_MS = 200;
+const SEND_MAX_WAIT_MS = 120_000;
+const SEND_ENTER_FALLBACK_AFTER_MS = 1_200;
+const SEND_POST_CLICK_LIMIT_CHECK_MS = 50;
+const OVER_LIMIT_RE = /over\s+limit\s+by|content\s+is\s+too\s+long|please\s+shorten\s+it/i;
+
+function getButtonLabel(button) {
+  return `${button.title || ""} ${button.ariaLabel || ""} ${button.getAttribute("aria-label") || ""} ${button.textContent || ""}`
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hasKnownSendIconPath(button) {
+  const d = getSvgPathData(button);
+  const compact = d.replace(/[,\s]/g, "");
+
+  return (
+    d.includes("M8.3125") ||
+    d.includes("M8.312") ||
+    d.includes("M13.12 19.98") ||
+    compact.includes("M1219V5") ||
+    compact.includes("M1219V6") ||
+    compact.includes("M1018V6") ||
+    (compact.includes("M222") && compact.includes("L1113")) ||
+    (compact.includes("M2.0121") && compact.includes("L2312"))
+  );
+}
+
+function hasHighConfidenceSendIconPath(button) {
+  const d = getSvgPathData(button);
+  const compact = d.replace(/[,\s]/g, "");
+
+  return (
+    d.includes("M8.3125") ||
+    d.includes("M8.312") ||
+    d.includes("M13.12 19.98") ||
+    compact.includes("M1219V5") ||
+    compact.includes("M1219V6") ||
+    compact.includes("M1018V6")
+  );
+}
+
+function hasExplicitSendLabel(button, label) {
+  return (
+    button.title === "Send message" ||
+    button.ariaLabel === "Send Message" ||
+    button.getAttribute("aria-label") === "Send Message" ||
+    label.includes("send message") ||
+    label.includes("submit message") ||
+    label.includes("\u53d1\u9001") ||
+    label === "send" ||
+    label === "submit"
+  );
+}
+
+function getSvgPathData(button) {
+  return Array.from(button.querySelectorAll("svg path"))
+    .map((path) => path.getAttribute("d") || "")
+    .join(" ");
+}
+
+function hasSendLikeIcon(button) {
+  const className = String(button.className || "").toLowerCase();
+  return (
+    button.querySelector(".ds-icon-send") ||
+    className.includes("send") ||
+    hasKnownSendIconPath(button)
+  );
+}
+
+function isBdsControlButton(button) {
+  return (
+    button.classList.contains("bds-plus-btn") ||
+    button.classList.contains("bds-deep-research-toggle") ||
+    isBdsOwnedElement(button) ||
+    button.closest("#bds-root, .bds-deep-research-mount, .bds-attach-menu-mount")
+  );
+}
+
+function isNonSendComposerControl(button, label) {
+  return (
+    isBdsControlButton(button) ||
+    label.includes("attach") ||
+    label.includes("upload") ||
+    label.includes("file") ||
+    label.includes("folder") ||
+    label.includes("voice") ||
+    label.includes("microphone") ||
+    label.includes("search") ||
+    label.includes("deepthink") ||
+    label.includes("deep think") ||
+    label.includes("deepresearch") ||
+    label.includes("deep research") ||
+    label.includes("expand") ||
+    label.includes("open") ||
+    label.includes("preview") ||
+    label.includes("fullscreen") ||
+    label.includes("enlarge")
+  );
+}
+
+function getComposerRootCandidates(editor) {
+  if (!editor) return [];
+
+  const roots = [];
+  const seen = new Set();
+  const addRoot = (root) => {
+    if (!root || root === document.body || root === document.documentElement || seen.has(root)) return;
+    seen.add(root);
+    roots.push(root);
+  };
+
+  const form = editor.closest?.("form");
+  addRoot(form);
+
+  let candidate = editor.parentElement;
+  for (let depth = 0; candidate && depth < 10; depth++) {
+    if (candidate === document.body || candidate === document.documentElement) break;
+    addRoot(candidate);
+    candidate = candidate.parentElement;
+  }
+
+  return roots;
+}
+
+function findNativeFileInput() {
+  return Array.from(document.querySelectorAll('input[type="file"][multiple]'))
+    .find((input) => !isBdsOwnedElement(input) && !input.disabled) || null;
+}
+
+function isAfterNode(reference, candidate) {
+  if (!reference || !candidate || reference === candidate) {
+    return true;
+  }
+
+  const following = globalThis.Node?.DOCUMENT_POSITION_FOLLOWING || 4;
+  return Boolean(reference.compareDocumentPosition(candidate) & following);
+}
+
+function getEligibleComposerIconButtons(root, editor) {
+  return Array.from(root.querySelectorAll('button, div[role="button"]'))
+    .filter((candidate) =>
+      (!editor || isAfterNode(editor, candidate)) &&
+      candidate.querySelector("svg") &&
+      !isNonSendComposerControl(candidate, getButtonLabel(candidate)),
+    );
+}
+
+function findIconOnlySendButtonInRoot(root, editor, { allowGenericLastIcon = false } = {}) {
+  const iconButtons = getEligibleComposerIconButtons(root, editor);
+  const sendLikeButton = iconButtons.find(hasSendLikeIcon);
+  if (sendLikeButton) return sendLikeButton;
+
+  return allowGenericLastIcon ? iconButtons[iconButtons.length - 1] || null : null;
+}
+
+function isComposerSendRegion(button, editor, roots) {
+  if (!editor) return true;
+  if (!roots.length) return isAfterNode(editor, button);
+  return roots.some((root) => root.contains(button)) && isAfterNode(editor, button);
+}
+
+function hasOverLimitText(element) {
+  return OVER_LIMIT_RE.test(element?.textContent || "");
+}
+
+function hasOverLimitIndicator(editor = findChatEditor()) {
+  const roots = getComposerRootCandidates(editor);
+  for (const root of roots) {
+    if (hasOverLimitText(root)) return true;
+  }
+
+  const indicatorCandidates = Array.from(document.querySelectorAll(
+    'span, div[role="alert"], div[role="status"], [class*="toast"], [class*="tooltip"], [class*="limit"]',
+  ));
+  return indicatorCandidates.some((candidate) =>
+    !isBdsOwnedElement(candidate) &&
+    !candidate.closest(".ds-message") &&
+    hasOverLimitText(candidate)
+  );
+}
+
 function findSendButton() {
+  const editor = findChatEditor();
+  const roots = getComposerRootCandidates(editor);
   const buttons = Array.from(document.querySelectorAll('div[role="button"], button'));
-  return buttons.find((button) => {
-    const label = `${button.title || ""} ${button.ariaLabel || ""} ${button.getAttribute("aria-label") || ""}`
-      .toLowerCase()
-      .trim();
-    const isSend =
-      button.querySelector('svg path[d*="M8.3125"], .ds-icon-send') ||
-      button.querySelector('svg path[d*="M13.12 19.98"]') ||
-      button.querySelector('svg path[d*="M12 19"]') ||
-      button.title === "Send message" ||
-      button.ariaLabel === "Send Message" ||
-      button.getAttribute("aria-label") === "Send Message" ||
-      label.includes("send message") ||
-      label === "send";
-    const isBdsControl =
-      button.classList.contains("bds-plus-btn") ||
-      button.classList.contains("bds-deep-research-toggle") ||
-      isBdsOwnedElement(button) ||
-      button.closest("#bds-root");
-    return isSend && !isBdsControl;
+  const explicitSend = buttons.find((button) => {
+    const label = getButtonLabel(button);
+    if (isBdsControlButton(button)) return false;
+    if (hasExplicitSendLabel(button, label)) {
+      return !editor || isAfterNode(editor, button);
+    }
+    if (hasHighConfidenceSendIconPath(button)) {
+      return !editor || isAfterNode(editor, button);
+    }
+    if (!isComposerSendRegion(button, editor, roots)) return false;
+    return button.querySelector(".ds-icon-send") || hasKnownSendIconPath(button);
   });
+  if (explicitSend) return explicitSend;
+
+  for (const root of roots) {
+    const candidate = findIconOnlySendButtonInRoot(root, editor);
+    if (candidate) return candidate;
+  }
+
+  for (const root of roots.slice().reverse()) {
+    const candidate = findIconOnlySendButtonInRoot(root, editor, { allowGenericLastIcon: true });
+    if (candidate) return candidate;
+  }
+
+  return null;
 }
 
 function isSendButtonDisabled(sendBtn) {
   return (
     sendBtn.getAttribute("aria-disabled") === "true" ||
+    sendBtn.hasAttribute("disabled") ||
+    sendBtn.classList.contains("ds-button--disabled") ||
     sendBtn.classList.contains("ds-icon-button--disabled") ||
+    Array.from(sendBtn.classList).some((className) => className.endsWith("--disabled")) ||
     sendBtn.disabled === true
   );
 }
 
-function sendCurrentChatInput(logLabel = "Auto message") {
-  let attempts = 0;
-  const maxAttempts = 50;
-  let enterFallbackSent = false;
+function sendCurrentChatInputResult(logLabel = "Auto message") {
+  return new Promise((resolve) => {
+    let attempts = 0;
+    const startedAt = Date.now();
+    let enterFallbackSent = false;
+    let settled = false;
 
-  const attemptSend = () => {
-    attempts++;
-    const sendBtn = findSendButton();
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
 
-    if (sendBtn) {
-      if (!isSendButtonDisabled(sendBtn)) {
-        sendBtn.click();
-        console.log(`[BDS:AUTO] ${logLabel} sent successfully after ${attempts} attempts.`);
+    const attemptSend = () => {
+      attempts++;
+      const elapsed = Date.now() - startedAt;
+      const editor = findChatEditor();
+
+      if (hasOverLimitIndicator(editor)) {
+        console.error(`[BDS:AUTO] Failed to send ${logLabel}: message is over the composer limit.`);
+        finish({ ok: false, reason: "over_limit", attempts });
         return;
       }
-    }
 
-    if (!enterFallbackSent && attempts === 6) {
-      enterFallbackSent = true;
-      const editor = findChatEditor();
-      if (editor) {
-        editor.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-        editor.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true }));
+      const sendBtn = findSendButton();
+
+      if (sendBtn) {
+        if (!isSendButtonDisabled(sendBtn)) {
+          sendBtn.click();
+          setTimeout(() => {
+            if (hasOverLimitIndicator(editor)) {
+              console.error(`[BDS:AUTO] Failed to send ${logLabel}: message is over the composer limit.`);
+              finish({ ok: false, reason: "over_limit", attempts });
+              return;
+            }
+            console.log(`[BDS:AUTO] ${logLabel} sent successfully after ${attempts} attempts.`);
+            finish({ ok: true, reason: "", attempts });
+          }, SEND_POST_CLICK_LIMIT_CHECK_MS);
+          return;
+        }
       }
-    }
 
-    if (attempts < maxAttempts) {
-      setTimeout(attemptSend, 200);
-    } else {
-      console.error(`[BDS:AUTO] Failed to send ${logLabel}: button stayed disabled or was not found.`);
-      const editor = findChatEditor();
-      if (editor) {
-        editor.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      if (!enterFallbackSent && elapsed >= SEND_ENTER_FALLBACK_AFTER_MS) {
+        enterFallbackSent = true;
+        const editor = findChatEditor();
+        if (editor) {
+          editor.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+          editor.dispatchEvent(new KeyboardEvent("keypress", { key: "Enter", bubbles: true }));
+          editor.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true }));
+        }
       }
-    }
-  };
 
-  setTimeout(attemptSend, 500);
+      if (elapsed < SEND_MAX_WAIT_MS) {
+        setTimeout(attemptSend, SEND_RETRY_DELAY_MS);
+      } else {
+        console.error(`[BDS:AUTO] Failed to send ${logLabel}: button stayed disabled or was not found.`);
+        if (editor) {
+          editor.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        }
+        finish({ ok: false, reason: "not_found_or_disabled", attempts });
+      }
+    };
+
+    setTimeout(attemptSend, SEND_INITIAL_DELAY_MS);
+  });
 }
 
+function sendCurrentChatInput(logLabel = "Auto message") {
+  return sendCurrentChatInputResult(logLabel).then((result) => result.ok);
+}
 
-async function injectFileAndSend(file, autoMessage = "") {
-  const nativeInput = document.querySelector('input[type="file"][multiple]');
+async function sendTextWithOverLimitFallbacks(textAttempts, logLabel) {
+  const attempts = textAttempts
+    .map((text) => String(text || ""))
+    .filter((text, index, arr) => text && arr.indexOf(text) === index);
+
+  if (attempts.length === 0) {
+    return sendCurrentChatInput(logLabel);
+  }
+
+  for (let i = 0; i < attempts.length; i++) {
+    if (!setChatInputText(attempts[i])) {
+      console.error(`[BDS:AUTO] Failed to send ${logLabel}: chat input was not found or could not be updated.`);
+      return false;
+    }
+
+    const result = await sendCurrentChatInputResult(
+      i === 0 ? logLabel : `${logLabel} retry ${i}`,
+    );
+    if (result.ok) return true;
+    if (result.reason !== "over_limit") return false;
+  }
+
+  return false;
+}
+
+export async function sendFileWithMessage(file, autoMessage = "", logLabel = "Auto file message", options = {}) {
+  const nativeInput = findNativeFileInput();
+  const fallbackTexts = [
+    options.overLimitFallbackText,
+    options.overLimitEmergencyText,
+  ];
 
   // // FALLBACK: inject file and send message directly if no file input is found
   if (!nativeInput) {
+    if (options.inlineText) {
+      return sendTextWithOverLimitFallbacks([
+        options.inlineText,
+        ...fallbackTexts,
+      ], logLabel);
+    }
+
     let fileContent;
     try {
-      fileContent = await file.text();
+      fileContent = await readFileText(file);
     } catch (err) {
       fileContent = `(Error reading file content: ${err.message})`;
     }
@@ -560,8 +871,10 @@ async function injectFileAndSend(file, autoMessage = "") {
     const langHint = LANG_HINTS[ext] || 'text';
 
     const fullMessage = `${autoMessage}\n\`\`\`${langHint}\n${fileContent}\n\`\`\``;
-    injectPureTextAndSend(fullMessage);
-    return;
+    return sendTextWithOverLimitFallbacks([
+      fullMessage,
+      ...fallbackTexts,
+    ], logLabel);
   }
 
   // normal path: file input exists, load the file
@@ -578,9 +891,12 @@ async function injectFileAndSend(file, autoMessage = "") {
   nativeInput.dispatchEvent(new Event("change", { bubbles: true }));
 
   // Phase 1: Inject text and file
-  if (autoMessage) {
-    setChatInputText(autoMessage);
-  }
+  return sendTextWithOverLimitFallbacks([
+    autoMessage,
+    ...fallbackTexts,
+  ], logLabel);
+}
 
-  sendCurrentChatInput("Auto file message");
+async function injectFileAndSend(file, autoMessage = "") {
+  return sendFileWithMessage(file, autoMessage);
 }

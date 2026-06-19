@@ -143,6 +143,71 @@ Findings.</BDS:DEEP_RESEARCH_REPORT>`;
     });
   });
 
+  describe("DEEP_RESEARCH_STEP_DONE", () => {
+    it("parses step-done tag with valid JSON", () => {
+      const text = `<BDS:DEEP_RESEARCH_STEP_DONE runId="run1" stepId="1">{"stepId":"1","analysis":"found good results","newInsights":["insight A","insight B"]}</BDS:DEEP_RESEARCH_STEP_DONE>`;
+      const result = parseBdsMessage(text);
+
+      expect(result.deepResearch.stepDone).toHaveLength(1);
+      expect(result.deepResearch.stepDone[0].runId).toBe("run1");
+      expect(result.deepResearch.stepDone[0].stepId).toBe("1");
+      expect(result.deepResearch.stepDone[0].analysis.stepId).toBe("1");
+      expect(result.deepResearch.stepDone[0].analysis.analysis).toBe("found good results");
+      expect(result.deepResearch.stepDone[0].analysis.newInsights).toEqual(["insight A", "insight B"]);
+    });
+
+    it("handles malformed step-done JSON", () => {
+      const text = `<BDS:DEEP_RESEARCH_STEP_DONE runId="run1" stepId="2">{broken json</BDS:DEEP_RESEARCH_STEP_DONE>`;
+      const result = parseBdsMessage(text);
+
+      expect(result.deepResearch.stepDone).toHaveLength(1);
+      expect(result.deepResearch.stepDone[0].runId).toBe("run1");
+      expect(result.deepResearch.stepDone[0].stepId).toBe("2");
+      expect(result.deepResearch.stepDone[0].analysis).toBeNull();
+      expect(result.deepResearch.stepDone[0].raw).toBe("{broken json");
+      expect(result.deepResearch.stepDone[0].error).toBeTruthy();
+    });
+
+    it("handles empty step-done", () => {
+      const text = `<BDS:DEEP_RESEARCH_STEP_DONE runId="run1" stepId="3"></BDS:DEEP_RESEARCH_STEP_DONE>`;
+      const result = parseBdsMessage(text);
+
+      expect(result.deepResearch.stepDone).toHaveLength(1);
+    });
+
+    it("parses stepDone with runid (case-insensitive)", () => {
+      const text = `<BDS:DEEP_RESEARCH_STEP_DONE runid="runX" stepId="1">{"stepId":"1","analysis":"ok","newInsights":[]}</BDS:DEEP_RESEARCH_STEP_DONE>`;
+      const result = parseBdsMessage(text);
+
+      expect(result.deepResearch.stepDone).toHaveLength(1);
+      expect(result.deepResearch.stepDone[0].runId).toBe("runX");
+    });
+
+    it("parses nextSteps in step-done JSON for adaptive expansion", () => {
+      const text = `<BDS:DEEP_RESEARCH_STEP_DONE runId="run1" stepId="1">{"stepId":"1","analysis":"found gaps","newInsights":["need more data"],"nextSteps":[{"action":"search","query":"follow-up specific query","purpose":"fill gap","sourceType":"academic","deepFetch":3}]}</BDS:DEEP_RESEARCH_STEP_DONE>`;
+      const result = parseBdsMessage(text);
+
+      expect(result.deepResearch.stepDone).toHaveLength(1);
+      expect(result.deepResearch.stepDone[0].analysis.nextSteps).toHaveLength(1);
+      expect(result.deepResearch.stepDone[0].analysis.nextSteps[0].action).toBe("search");
+      expect(result.deepResearch.stepDone[0].analysis.nextSteps[0].query).toBe("follow-up specific query");
+      expect(result.deepResearch.stepDone[0].analysis.nextSteps[0].purpose).toBe("fill gap");
+      expect(result.deepResearch.stepDone[0].analysis.nextSteps[0].sourceType).toBe("academic");
+      expect(result.deepResearch.stepDone[0].analysis.nextSteps[0].deepFetch).toBe(3);
+    });
+
+    it("malformed nextSteps does not break step-done parsing", () => {
+      // nextSteps contains invalid entries but the JSON itself is valid
+      const text = `<BDS:DEEP_RESEARCH_STEP_DONE runId="run1" stepId="1">{"stepId":"1","analysis":"ok","newInsights":[],"nextSteps":[{"action":"invalid","query":""}]}</BDS:DEEP_RESEARCH_STEP_DONE>`;
+      const result = parseBdsMessage(text);
+
+      expect(result.deepResearch.stepDone).toHaveLength(1);
+      expect(result.deepResearch.stepDone[0].analysis).toBeTruthy();
+      expect(result.deepResearch.stepDone[0].analysis.nextSteps).toHaveLength(1);
+      expect(result.deepResearch.stepDone[0].analysis.analysis).toBe("ok");
+    });
+  });
+
   describe("Multiple deep research tags in one message", () => {
     it("parses plan + status in same message", () => {
       const text = [
@@ -153,6 +218,19 @@ Findings.</BDS:DEEP_RESEARCH_REPORT>`;
 
       expect(result.deepResearch.plans).toHaveLength(1);
       expect(result.deepResearch.statuses).toHaveLength(1);
+    });
+
+    it("parses plan + step-done + report in same message", () => {
+      const text = [
+        `<BDS:DEEP_RESEARCH_STATUS runId="m2">{"completedSteps":1,"totalSteps":2}</BDS:DEEP_RESEARCH_STATUS>`,
+        `<BDS:DEEP_RESEARCH_STEP_DONE runId="m2" stepId="2">{"stepId":"2","analysis":"done"}</BDS:DEEP_RESEARCH_STEP_DONE>`,
+        `<BDS:DEEP_RESEARCH_REPORT runId="m2"># Final</BDS:DEEP_RESEARCH_REPORT>`,
+      ].join("\n");
+      const result = parseBdsMessage(text);
+
+      expect(result.deepResearch.statuses).toHaveLength(1);
+      expect(result.deepResearch.stepDone).toHaveLength(1);
+      expect(result.deepResearch.reports).toHaveLength(1);
     });
   });
 
@@ -171,7 +249,22 @@ Findings.</BDS:DEEP_RESEARCH_REPORT>`;
       const result = parseBdsMessage(text);
 
       expect(result.autoRequests.searchQueries).toEqual([
-        { query: "gaming laptop reviews", deepFetch: 2, runId: "run42" },
+        { query: "gaming laptop reviews", deepFetch: 2, runId: "run42", purpose: "", sourceType: "" },
+      ]);
+    });
+
+    it("parses purpose and sourceType from search tags", () => {
+      const text = '<BDS:AUTO:SEARCH runId="run42" deepFetch="2" purpose="compare thermals" sourceType="reviews">gaming laptop reviews 2025</BDS:AUTO:SEARCH>';
+      const result = parseBdsMessage(text);
+
+      expect(result.autoRequests.searchQueries).toEqual([
+        {
+          query: "gaming laptop reviews 2025",
+          deepFetch: 2,
+          runId: "run42",
+          purpose: "compare thermals",
+          sourceType: "reviews",
+        },
       ]);
     });
   });

@@ -25,6 +25,9 @@ const mocks = vi.hoisted(() => ({
   handleAutoYouTubeFetch: vi.fn(),
   handleAutoSearch: vi.fn(),
   handleAutoSearchForRun: vi.fn(),
+  clearRunSearchHistory: vi.fn(),
+  injectPureTextAndSend: vi.fn(() => true),
+  sendFileWithMessage: vi.fn(() => Promise.resolve(true)),
   mount: vi.fn((component, { target, props }) => {
     const marker = document.createElement("div");
     marker.className = "mock-overlay";
@@ -74,6 +77,9 @@ vi.mock("../../src/content/auto.js", () => ({
   handleAutoYouTubeFetch: mocks.handleAutoYouTubeFetch,
   handleAutoSearch: mocks.handleAutoSearch,
   handleAutoSearchForRun: mocks.handleAutoSearchForRun,
+  clearRunSearchHistory: mocks.clearRunSearchHistory,
+  injectPureTextAndSend: mocks.injectPureTextAndSend,
+  sendFileWithMessage: mocks.sendFileWithMessage,
 }));
 vi.mock("svelte", async () => {
   const actual = await vi.importActual("svelte");
@@ -237,7 +243,7 @@ describe("message processor integration", () => {
 
   it("routes run-scoped AUTO search requests to the deep research handler", () => {
     const node = createMessageNode(
-      '<BDS:AUTO:SEARCH runId="run1" deepFetch="2">gaming laptop reviews</BDS:AUTO:SEARCH>',
+      '<BDS:AUTO:SEARCH runId="run1" deepFetch="2" purpose="compare thermals" sourceType="reviews">gaming laptop reviews</BDS:AUTO:SEARCH>',
     );
 
     processMessageNode(node);
@@ -248,8 +254,150 @@ describe("message processor integration", () => {
       "gaming laptop reviews",
       2,
       "run1",
+      { purpose: "compare thermals", sourceType: "reviews" },
     );
     expect(mocks.handleAutoSearch).not.toHaveBeenCalled();
+  });
+
+  it("suppresses AUTO tags only for managed Deep Research runs in the current conversation", () => {
+    state.deepResearch.runs = [{
+      id: "managed-other",
+      conversationId: "other-conversation",
+      status: "running",
+      execution: { managed: true, steps: [], currentStepIndex: 0, awaitingAnalysisStepId: null, reportRequested: false },
+    }];
+    const node = createMessageNode(
+      "<BDS:AUTO:REQUEST_WEB_FETCH>https://example.com</BDS:AUTO:REQUEST_WEB_FETCH>",
+    );
+
+    processMessageNode(node);
+    vi.advanceTimersByTime(3000);
+    processMessageNode(node);
+
+    expect(mocks.handleAutoWebFetch).toHaveBeenCalledWith("https://example.com/");
+  });
+
+  it("suppresses AUTO tags for managed Deep Research runs in the current conversation", () => {
+    state.deepResearch.runs = [{
+      id: "managed-current",
+      conversationId: "default",
+      status: "running",
+      execution: { managed: true, steps: [], currentStepIndex: 0, awaitingAnalysisStepId: null, reportRequested: false },
+    }];
+    const node = createMessageNode(
+      "<BDS:AUTO:REQUEST_WEB_FETCH>https://example.com</BDS:AUTO:REQUEST_WEB_FETCH>",
+    );
+
+    processMessageNode(node);
+    vi.advanceTimersByTime(3000);
+    processMessageNode(node);
+
+    expect(mocks.handleAutoWebFetch).not.toHaveBeenCalled();
+  });
+
+  it("recovers managed Deep Research when the model emits AUTO search instead of step-done", async () => {
+    const run = {
+      id: "managed-current",
+      conversationId: "default",
+      status: "running",
+      execution: {
+        managed: true,
+        steps: [{ id: "3", status: "awaiting_analysis", outcome: "{}", error: null }],
+        currentStepIndex: 0,
+        awaitingAnalysisStepId: "3",
+        reportRequested: false,
+      },
+    };
+    state.deepResearch.runs = [run];
+    const node = createMessageNode(
+      'Step 3 found useful evidence. I should execute step 4 now.\n<BDS:AUTO:SEARCH runId="managed-current" deepFetch="3">Originality.ai Copyleaks AI detector performance comparison 2025</BDS:AUTO:SEARCH>',
+    );
+
+    processMessageNode(node);
+    await Promise.resolve();
+
+    expect(mocks.handleAutoSearchForRun).not.toHaveBeenCalled();
+    expect(run.execution.steps[0].status).toBe("complete");
+    expect(run.execution.awaitingAnalysisStepId).toBeNull();
+    expect(run.execution.reportRequested).toBe(true);
+    expect(mocks.mount).toHaveBeenCalledOnce();
+    const props = mocks.mount.mock.calls[0][1].props;
+    expect(props.text).toContain("Step 3 found useful evidence");
+    expect(props.blocks.some((block) => block.name === "auto:search")).toBe(false);
+  });
+
+  it("does not render early managed Deep Research reports before the report gate opens", () => {
+    state.deepResearch.runs = [{
+      id: "run-early-report",
+      conversationId: "default",
+      status: "running",
+      execution: {
+        managed: true,
+        steps: [{ id: "1", status: "awaiting_analysis" }],
+        currentStepIndex: 0,
+        awaitingAnalysisStepId: "1",
+        reportRequested: false,
+      },
+    }];
+    const node = createMessageNode(
+      '<BDS:DEEP_RESEARCH_REPORT runId="run-early-report"># Early Report</BDS:DEEP_RESEARCH_REPORT>',
+    );
+
+    processMessageNode(node);
+
+    expect(mocks.mount).toHaveBeenCalledOnce();
+    expect(mocks.mount.mock.calls[0][1].props.blocks).toEqual([]);
+  });
+
+  it("renders managed Deep Research reports after all steps complete and reporting is requested", () => {
+    state.deepResearch.runs = [{
+      id: "run-final-report",
+      conversationId: "default",
+      status: "reporting",
+      execution: {
+        managed: true,
+        steps: [{ id: "1", status: "complete" }],
+        currentStepIndex: 1,
+        awaitingAnalysisStepId: null,
+        reportRequested: true,
+      },
+    }];
+    const node = createMessageNode(
+      '<BDS:DEEP_RESEARCH_REPORT runId="run-final-report"># Final Report</BDS:DEEP_RESEARCH_REPORT>',
+    );
+
+    processMessageNode(node);
+
+    expect(mocks.mount).toHaveBeenCalledOnce();
+    expect(mocks.mount.mock.calls[0][1].props.blocks[0].name).toBe("deep_research_report");
+  });
+
+  it("defers Deep Research step-done side effects until generation is complete", () => {
+    const stopButton = document.createElement("div");
+    stopButton.className = "ds-icon-stop";
+    document.body.appendChild(stopButton);
+
+    const listener = vi.fn();
+    window.addEventListener("bds:deep-research-step-done", listener);
+    const node = createMessageNode(
+      '<BDS:DEEP_RESEARCH_STEP_DONE runId="run-streaming" stepId="2">{"analysis":"done","newInsights":["x"]}</BDS:DEEP_RESEARCH_STEP_DONE>',
+    );
+
+    processMessageNode(node);
+    expect(listener).not.toHaveBeenCalled();
+
+    stopButton.remove();
+    vi.advanceTimersByTime(3000);
+    processMessageNode(node);
+
+    expect(listener).toHaveBeenCalledOnce();
+    expect(listener.mock.calls[0][0].detail).toMatchObject({
+      runId: "run-streaming",
+      stepId: "2",
+      analysis: { analysis: "done", newInsights: ["x"] },
+    });
+
+    window.removeEventListener("bds:deep-research-step-done", listener);
   });
 
   it("dispatches clarifying questions and stores them on state", () => {
