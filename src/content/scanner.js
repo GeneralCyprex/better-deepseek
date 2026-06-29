@@ -4,6 +4,7 @@
 
 import state, { withObserverPaused } from "./state.js";
 import { LONG_WORK_STALE_MS } from "../lib/constants.js";
+import { devLog } from "../lib/dev-log.js";
 import { processMessageNode } from "./message-processor.svelte.js";
 import { mount, unmount } from "svelte";
 import AttachMenu from "./ui/AttachMenu.svelte";
@@ -645,7 +646,7 @@ export function startUrlWatcher() {
   state.urlWatchTimer = window.setInterval(() => {
     if (location.href === state.lastUrl) {
       if (autocompleteInstance && currentEditor && !document.contains(currentEditor)) {
-        console.log("[BDS:Cmd] Editor detached — re-initializing")
+        devLog("Cmd", "Editor detached — re-initializing")
         if (currentKeydownHandler) {
           currentEditor.removeEventListener("keydown", currentKeydownHandler)
           currentKeydownHandler = null
@@ -697,7 +698,7 @@ export function startUrlWatcher() {
     }
     const oldTotal = document.querySelector(".bds-session-total");
     if (oldTotal) oldTotal.remove();
-    if (autocompleteInstance || commandsHelpInstance || document.querySelector(".bds-cmd-autocomplete")) console.log("[BDS:Cmd] URL change cleanup")
+    if (autocompleteInstance || commandsHelpInstance || document.querySelector(".bds-cmd-autocomplete")) devLog("Cmd", "URL change cleanup")
     if (currentEditor && currentKeydownHandler) {
       currentEditor.removeEventListener("keydown", currentKeydownHandler)
       currentKeydownHandler = null
@@ -741,17 +742,17 @@ let currentEditor = null
 let currentKeydownHandler = null
 
 function retrySetupCommandListener() {
-  console.log("[BDS:Cmd] retrySetupCommandListener start, autoInst=", !!autocompleteInstance, "timer=", !!cmdSetupTimer)
+  devLog("Cmd", "retrySetupCommandListener start, autoInst=", !!autocompleteInstance, "timer=", !!cmdSetupTimer)
   if (autocompleteInstance || cmdSetupTimer) {
-    console.log("[BDS:Cmd] retrySetupCommandListener skipped")
+    devLog("Cmd", "retrySetupCommandListener skipped")
     return
   }
   let delay = 500
   const MAX_DELAY = 30000
   const poll = () => {
-    if (autocompleteInstance) { cmdSetupTimer = 0; console.log("[BDS:Cmd] poll cancelled (autoInst set)"); return }
+    if (autocompleteInstance) { cmdSetupTimer = 0; devLog("Cmd", "poll cancelled (autoInst set)"); return }
     const ed = findComposerEditor()
-    console.log("[BDS:Cmd] poll editor=", !!ed, "tag=", ed?.tagName, "id=", ed?.id)
+    devLog("Cmd", "poll editor=", !!ed, "tag=", ed?.tagName, "id=", ed?.id)
     if (ed) { cmdSetupTimer = 0; setupCommandListener(ed); return }
     delay = Math.min(delay * 2, MAX_DELAY)
     cmdSetupTimer = setTimeout(poll, delay)
@@ -760,9 +761,9 @@ function retrySetupCommandListener() {
 }
 
 function setupCommandListener(editor) {
-  console.log("[BDS:Cmd] setupCommandListener called, editor=", !!editor, "autoInst=", !!autocompleteInstance, "tag=", editor?.tagName, "id=", editor?.id)
+  devLog("Cmd", "setupCommandListener called, editor=", !!editor, "autoInst=", !!autocompleteInstance, "tag=", editor?.tagName, "id=", editor?.id)
   if (autocompleteInstance) {
-    console.log("[BDS:Cmd] setupCommandListener skipped (already mounted)")
+    devLog("Cmd", "setupCommandListener skipped (already mounted)")
     return
   }
   if (!editor) { retrySetupCommandListener(); return }
@@ -773,17 +774,17 @@ function setupCommandListener(editor) {
 
   const handler = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
-      if (!document.contains(editor)) { console.log("[BDS:Cmd] Enter ignored — editor detached"); return }
+      if (!document.contains(editor)) { devLog("Cmd", "Enter ignored — editor detached"); return }
       const dropdown = document.querySelector(".bds-cmd-dropdown")
-      if (dropdown) { console.log("[BDS:Cmd] Enter ignored — dropdown open"); return }
+      if (dropdown) { devLog("Cmd", "Enter ignored — dropdown open"); return }
       const text = (() => { const t = (editor.tagName || "").toLowerCase(); return t === "textarea" || t === "input" ? editor.value : (editor.textContent || "") })()
-      console.log("[BDS:Cmd] Enter pressed, text=" + text.substring(0, 80).replace(/\n/g, "\\n"))
+      devLog("Cmd", "Enter pressed, text=", text.substring(0, 80).replace(/\n/g, "\\n"))
       if (text.startsWith("/")) {
         const hasSpaceAfterCmd = /^\/[a-z0-9_]+\s/.test(text)
         if (hasSpaceAfterCmd || /^\/[a-z0-9_]+$/.test(text)) {
           e.preventDefault()
           const ok = tryExecuteRawInput(text)
-          console.log("[BDS:Cmd] Enter execute cmd result=", ok)
+          devLog("Cmd", "Enter execute cmd result=", ok)
           if (ok) {
             const t = (editor.tagName || "").toLowerCase()
             if (t === "textarea" || t === "input") editor.value = ""
@@ -803,7 +804,7 @@ function setupCommandListener(editor) {
   mountPoint.className = "bds-cmd-autocomplete"
   document.body.appendChild(mountPoint)
 
-  console.log("[BDS:Cmd] Mounting Autocomplete component, editor=", editor?.tagName, "#" + (editor?.id || ""))
+  devLog("Cmd", "Mounting Autocomplete component, editor=", editor?.tagName, "#" + (editor?.id || ""))
   autocompleteInstance = mount(Autocomplete, {
     target: mountPoint,
     props: { editor },

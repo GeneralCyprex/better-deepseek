@@ -4,6 +4,7 @@ import { tryExecuteRawInput } from "./executor.js"
 import { injectPureTextAndSend } from "../auto.js"
 import appState from "../state.js"
 import { t } from "../../lib/i18n.svelte.js"
+import { devLog } from "../../lib/dev-log.js"
 
   function editorValue(el) {
     const t = (el.tagName || "").toLowerCase()
@@ -53,12 +54,12 @@ import { t } from "../../lib/i18n.svelte.js"
 
   $effect(() => {
     if (!editor) return
-    console.log("[BDS:Cmd] AC mounted on", editor.tagName, "#" + (editor.id || ""))
+    devLog("Cmd", "AC mounted on", editor.tagName, "#" + (editor.id || ""))
     editor.addEventListener("input", handleInput)
     editor.addEventListener("keydown", handleKeydown)
     editor.addEventListener("blur", handleBlur)
     return () => {
-      console.log("[BDS:Cmd] AC destroyed")
+      devLog("Cmd", "AC destroyed")
       editor.removeEventListener("input", handleInput)
       editor.removeEventListener("keydown", handleKeydown)
       editor.removeEventListener("blur", handleBlur)
@@ -70,27 +71,27 @@ import { t } from "../../lib/i18n.svelte.js"
     const text = editorValue(e.target)
     const pos = getCursorPosition(e.target)
     const beforeCursor = text.slice(0, pos)
-    console.log("[BDS:Cmd] input text=" + text.substring(0, 50).replace(/\n/g, "\\n"), "pos=" + pos, "open=" + isOpen)
+    devLog("Cmd", "input text=", text.substring(0, 50).replace(/\n/g, "\\n"), "pos=", pos, "open=", isOpen)
     if (beforeCursor.startsWith("/")) {
       const afterSlash = beforeCursor.slice(1)
       if (!afterSlash.includes(" ")) {
         lastSlashPos = 0; query = afterSlash; selectedIndex = 0
         updateFiltered(); updatePosition(e.target)
         isOpen = filteredItems.length > 0
-        console.log("[BDS:Cmd] dropdown " + (isOpen ? "OPEN" : "CLOSED (no matches)") + " query=" + query + " items=" + filteredItems.length)
+        devLog("Cmd", "dropdown", isOpen ? "OPEN" : "CLOSED (no matches)", "query=", query, "items=", filteredItems.length)
         return
       }
     }
-    if (isOpen) { isOpen = false; console.log("[BDS:Cmd] dropdown CLOSED (no slash at start or space after slash)") }
+    if (isOpen) { isOpen = false; devLog("Cmd", "dropdown CLOSED (no slash at start or space after slash)") }
   }
 
   function handleKeydown(e) {
     if (!isOpen) return
-    console.log("[BDS:Cmd] key=" + e.key + " idx=" + selectedIndex + "/" + filteredItems.length)
+    devLog("Cmd", "key=", e.key, "idx=", selectedIndex, "/", filteredItems.length)
     if (e.key === "ArrowDown") { e.preventDefault(); selectedIndex = Math.min(selectedIndex + 1, filteredItems.length - 1); scrollToSelected() }
     else if (e.key === "ArrowUp") { e.preventDefault(); selectedIndex = Math.max(selectedIndex - 1, 0); scrollToSelected() }
     else if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); selectCurrent() }
-    else if (e.key === "Escape") { e.preventDefault(); isOpen = false; console.log("[BDS:Cmd] dropdown closed via Escape") }
+    else if (e.key === "Escape") { e.preventDefault(); isOpen = false; devLog("Cmd", "dropdown closed via Escape") }
   }
 
   function updateFiltered() {
@@ -111,16 +112,16 @@ import { t } from "../../lib/i18n.svelte.js"
 
   function selectCurrent() {
     const item = filteredItems[selectedIndex]
-    if (!item) { console.log("[BDS:Cmd] selectCurrent: no item at index", selectedIndex); return }
+    if (!item) { devLog("Cmd", "selectCurrent: no item at index", selectedIndex); return }
     isOpen = false
-    console.log("[BDS:Cmd] select type=" + item.type + " id=" + item.id)
+    devLog("Cmd", "select type=", item.type, "id=", item.id)
     if (item.type === "builtin") {
       const text = editorValue(editor)
       const before = text.slice(0, lastSlashPos)
       setEditorValue(editor, before)
       editor.dispatchEvent(new Event("input", { bubbles: true }))
-      if (item.id === "help") { window.dispatchEvent(new CustomEvent("bds:show-help")); console.log("[BDS:Cmd] help event dispatched") }
-      else if (item.cmd.minArgs === 0) { console.log("[BDS:Cmd] executing zero-arg builtin:", item.id); tryExecuteRawInput("/" + item.id) }
+      if (item.id === "help") { window.dispatchEvent(new CustomEvent("bds:show-help")); devLog("Cmd", "help event dispatched") }
+      else if (item.cmd.minArgs === 0) { devLog("Cmd", "executing zero-arg builtin:", item.id); tryExecuteRawInput("/" + item.id) }
       else {
         setEditorValue(editor, "/" + item.id + " ")
         const len = editorValue(editor).length
@@ -128,7 +129,7 @@ import { t } from "../../lib/i18n.svelte.js"
         if (typeof editor.setSelectionRange === "function") editor.setSelectionRange(len, len)
         editor.focus()
       }
-    } else if (item.type === "snippet") { console.log("[BDS:Cmd] executing snippet:", item.id); injectPureTextAndSend(item.snippet.content, `/${item.id}`) }
+    } else if (item.type === "snippet") { devLog("Cmd", "executing snippet:", item.id); injectPureTextAndSend(item.snippet.content, `/${item.id}`) }
   }
 
   function handleItemClick(index) { selectedIndex = index; selectCurrent() }

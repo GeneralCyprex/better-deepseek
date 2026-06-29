@@ -18,6 +18,7 @@ import "bds-platform-globals";
 import "../styles/content.css";
 
 import state from "./state.js";
+import { setDevLogging } from "../lib/dev-log.js";
 import { loadStateFromStorage, bindStorageChangeListener } from "./storage.js";
 import { injectHookScript, setupBridgeEvents, pushConfigToPage } from "./bridge.js";
 import { mountUi } from "./ui/mount.js";
@@ -46,6 +47,10 @@ if (!window[CONTENT_BOOTSTRAP_KEY]) {
 async function init() {
   await waitForBody();
   await loadStateFromStorage();
+
+  if (typeof localStorage !== "undefined" && localStorage.getItem("bds:devlog")) {
+    setDevLogging(true);
+  }
 
   applyCustomCSS(state.settings.customCSS, state.cssSnippets);
 
