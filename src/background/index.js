@@ -11,6 +11,8 @@ export {
   GITHUB_COMMITS_PAGE_SIZE,
 };
 
+export { fetchPageContent };
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || !message.type) return false;
 
@@ -71,13 +73,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === "bds-fetch-url") {
     fetchPageContent(message.url, message.options)
-      .then((html) => {
-        sendResponse({ ok: true, html });
+      .then((result) => {
+        sendResponse({ ok: true, html: result.html, status: result.status });
       })
       .catch((error) => {
         sendResponse({
           ok: false,
           error: String(error && error.message ? error.message : error),
+          status: error.status || null,
         });
       });
     return true;
@@ -387,9 +390,18 @@ async function fetchPageContent(url, options = {}) {
     fetchOptions.body = options.body;
   }
 
+  if (options.credentials) {
+    fetchOptions.credentials = options.credentials;
+  }
+  if (options.redirect) {
+    fetchOptions.redirect = options.redirect;
+  }
+
   const resp = await fetch(url, fetchOptions);
   if (!resp.ok) {
-    throw new Error(`Server returned ${resp.status} for ${url}`);
+    const error = new Error(`Server returned ${resp.status} for ${url}`);
+    error.status = resp.status;
+    throw error;
   }
 
   const buffer = await resp.arrayBuffer();
@@ -399,11 +411,14 @@ async function fetchPageContent(url, options = {}) {
     charset = detectCharsetFromHtml(buffer);
   }
 
+  let html;
   try {
-    return new TextDecoder(charset || "utf-8", { fatal: false }).decode(buffer);
+    html = new TextDecoder(charset || "utf-8", { fatal: false }).decode(buffer);
   } catch {
-    return new TextDecoder("utf-8", { fatal: false }).decode(buffer);
+    html = new TextDecoder("utf-8", { fatal: false }).decode(buffer);
   }
+
+  return { html, status: resp.status };
 }
 
 // Open chat.deepseek.com when the extension toolbar icon is clicked

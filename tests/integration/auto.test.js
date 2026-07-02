@@ -814,4 +814,46 @@ describe("auto integration", () => {
     const input = document.querySelector('input[type="file"]');
     expect(input.files[0].name).toContain("search_error_bad_query");
   });
+
+  it("removes dedupe key when global search fails, allowing retry", async () => {
+    readerMocks.searchWeb
+      .mockRejectedValueOnce(new Error("search error"))
+      .mockResolvedValueOnce({
+        file: new File(["results"], "q.md", { type: "text/markdown" }),
+        results: [{ title: "R1", url: "https://a.com", snippet: "s" }],
+        query: "retry query",
+        deepFetch: 0,
+      });
+    const { handleAutoSearch } = await importAutoModule();
+
+    await handleAutoSearch("retry query");
+    await vi.advanceTimersByTimeAsync(600);
+
+    await handleAutoSearch("retry query");
+    await vi.advanceTimersByTimeAsync(600);
+
+    expect(readerMocks.searchWeb).toHaveBeenCalledTimes(2);
+  });
+
+  it("removes dedupe key when run-scoped search fails, allowing retry", async () => {
+    readerMocks.searchWeb
+      .mockRejectedValueOnce(new Error("search error"))
+      .mockResolvedValueOnce({
+        file: new File(["results"], "q.md", { type: "text/markdown" }),
+        results: [{ title: "R1", url: "https://a.com", snippet: "s" }],
+        query: "run query",
+        deepFetch: 0,
+      });
+    const { handleAutoSearchForRun, getRunSearchQueries } = await importAutoModule();
+
+    await handleAutoSearchForRun("run query", 0, "run-1");
+    await vi.advanceTimersByTimeAsync(600);
+
+    await handleAutoSearchForRun("run query", 0, "run-1");
+    await vi.advanceTimersByTimeAsync(600);
+
+    expect(readerMocks.searchWeb).toHaveBeenCalledTimes(2);
+    const runQueries = getRunSearchQueries("run-1");
+    expect(runQueries?.size).toBe(1);
+  });
 });

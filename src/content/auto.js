@@ -202,6 +202,7 @@ export async function handleAutoSearch(query, deepFetch = 0, options = {}) {
     }
   } catch (err) {
     console.error("[BDS:AUTO] Search Failed:", err);
+    processedSearchQueries.delete(dedupeKey);
     const errorBlob = new Blob([`Failed to search "${q}":\n\n${err.message}`], { type: "text/plain" });
     const errorFile = new File([errorBlob], `search_error_${q.replace(/[^a-zA-Z0-9]/g, "_")}.txt`, { type: "text/plain" });
     injectFileAndSend(errorFile, `<BetterDeepSeek>\n[BDS:AUTO] Search failed for: ${q}\n</BetterDeepSeek>`);
@@ -263,6 +264,7 @@ export async function handleAutoSearchForRun(query, deepFetch = 0, runId = "", o
     }
   } catch (err) {
     console.error("[BDS:AUTO] Run-scoped Search Failed:", err);
+    runSet.delete(dedupeKey);
     const errorBlob = new Blob([`Failed to search "${q}":\n\n${err.message}`], { type: "text/plain" });
     const errorFile = new File([errorBlob], `search_error_${q.replace(/[^a-zA-Z0-9]/g, "_")}.txt`, { type: "text/plain" });
     injectFileAndSend(errorFile, `<BetterDeepSeek>\n[BDS:AUTO] Search failed for: ${q} (runId=${runId})\n</BetterDeepSeek>`);

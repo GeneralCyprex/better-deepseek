@@ -320,6 +320,7 @@ describe("searchWeb", () => {
   it("falls back to Bing when DuckDuckGo returns the Android anomaly page", async () => {
     chromeSendMessageMock
       .mockResolvedValueOnce({ ok: true, status: 202, html: makeDdgChallengeHtml() })
+      .mockResolvedValueOnce({ ok: true, status: 202, html: makeDdgChallengeHtml() })
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -335,9 +336,10 @@ describe("searchWeb", () => {
     const result = await searchWeb("top dog breeds Philippines pet owners", 0, ON_STATUS);
     const text = await readFileAsText(result.file);
 
-    expect(chromeSendMessageMock).toHaveBeenCalledTimes(2);
+    expect(chromeSendMessageMock).toHaveBeenCalledTimes(3);
     expect(chromeSendMessageMock.mock.calls[0][0].url).toContain("lite.duckduckgo.com");
-    expect(chromeSendMessageMock.mock.calls[1][0].url).toContain("www.bing.com/search");
+    expect(chromeSendMessageMock.mock.calls[1][0].url).toContain("html.duckduckgo.com");
+    expect(chromeSendMessageMock.mock.calls[2][0].url).toContain("www.bing.com/search");
     expect(result.provider).toBe("Bing");
     expect(result.results).toEqual([
       {
@@ -377,6 +379,17 @@ describe("searchWeb", () => {
             title: "Developer tools overview",
             url: "https://example.com/dev-tools",
             snippet: "A general overview of developer tools.",
+          },
+        ]),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        html: makeResultHtml([
+          {
+            title: "DDG HTML tools overview",
+            url: "https://example.com/html-tools",
+            snippet: "Still a weak match for the real query.",
           },
         ]),
       })
@@ -566,5 +579,64 @@ describe("searchWeb", () => {
 
     const result = await searchWeb("Hello World! @#$", 0, ON_STATUS);
     expect(result.file.name).toBe("hello-world------search.md");
+  });
+
+  it("sends search request with safe fetch options and headers", async () => {
+    const html = makeResultHtml([{ title: "T", url: "https://t.com", snippet: "s" }]);
+    chromeSendMessageMock.mockResolvedValue({ ok: true, status: 200, html });
+    await searchWeb("test", 0, ON_STATUS);
+
+    const sentMessage = chromeSendMessageMock.mock.calls[0][0];
+    expect(sentMessage.type).toBe("bds-fetch-url");
+    expect(sentMessage.options).toBeDefined();
+    expect(sentMessage.options.method).toBe("GET");
+    expect(sentMessage.options.headers).toBeDefined();
+    expect(sentMessage.options.headers.Accept).toContain("text/html");
+    expect(sentMessage.options.headers).not.toHaveProperty("User-Agent");
+    expect(sentMessage.options.credentials).toBe("omit");
+    expect(sentMessage.options.redirect).toBe("follow");
+  });
+
+  it("uses DuckDuckGo HTML when Lite returns challenge", async () => {
+    chromeSendMessageMock
+      .mockResolvedValueOnce({ ok: true, status: 202, html: makeDdgChallengeHtml() })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        html: makeResultHtml([
+          { title: "test result one", url: "https://html-result.com/one", snippet: "test content about tests" },
+          { title: "test result two", url: "https://html-result.com/two", snippet: "more test content" },
+          { title: "test result three", url: "https://html-result.com/three", snippet: "third test result" },
+        ]),
+      });
+
+    const result = await searchWeb("test", 0, ON_STATUS);
+
+    expect(chromeSendMessageMock).toHaveBeenCalledTimes(2);
+    expect(chromeSendMessageMock.mock.calls[0][0].url).toContain("lite.duckduckgo.com");
+    expect(chromeSendMessageMock.mock.calls[1][0].url).toContain("html.duckduckgo.com");
+    expect(result.provider).toBe("DuckDuckGo");
+    expect(result.results[0].url).toBe("https://html-result.com/one");
+  });
+
+  it("falls back from DuckDuckGo Lite to DuckDuckGo HTML to Bing", async () => {
+    chromeSendMessageMock
+      .mockResolvedValueOnce({ ok: true, status: 202, html: makeDdgChallengeHtml() })
+      .mockResolvedValueOnce({ ok: true, status: 202, html: makeDdgChallengeHtml() })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        html: makeBingResultHtml([
+          { title: "Bing Result", url: "https://bing-result.com", snippet: "fallback worked" },
+        ]),
+      });
+
+    const result = await searchWeb("test", 0, ON_STATUS);
+
+    expect(chromeSendMessageMock).toHaveBeenCalledTimes(3);
+    expect(chromeSendMessageMock.mock.calls[0][0].url).toContain("lite.duckduckgo.com");
+    expect(chromeSendMessageMock.mock.calls[1][0].url).toContain("html.duckduckgo.com");
+    expect(chromeSendMessageMock.mock.calls[2][0].url).toContain("www.bing.com/search");
+    expect(result.provider).toBe("Bing");
   });
 });

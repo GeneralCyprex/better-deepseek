@@ -9,13 +9,31 @@ import { fetchAndConvertWebPage } from "./web-reader.js";
 import { buildEffectiveSearchQuery, rankSearchResults } from "./search-quality.js";
 
 const DUCKDUCKGO_SEARCH_URL = "https://lite.duckduckgo.com/lite/?q=";
+const DUCKDUCKGO_HTML_SEARCH_URL = "https://html.duckduckgo.com/html/?q=";
 const BING_SEARCH_URL = "https://www.bing.com/search?q=";
 const MAX_DEEP_FETCH = 5;
+
+const SEARCH_FETCH_OPTIONS = {
+  method: "GET",
+  headers: {
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache, no-store",
+    Pragma: "no-cache",
+  },
+  credentials: "omit",
+  redirect: "follow",
+};
 
 const SEARCH_PROVIDERS = [
   {
     name: "DuckDuckGo",
     url: (query) => DUCKDUCKGO_SEARCH_URL + encodeURIComponent(query),
+    parse: parseDuckDuckGoSearchResults,
+  },
+  {
+    name: "DuckDuckGo",
+    url: (query) => DUCKDUCKGO_HTML_SEARCH_URL + encodeURIComponent(query),
     parse: parseDuckDuckGoSearchResults,
   },
   {
@@ -318,6 +336,7 @@ export async function searchWeb(query, deepFetch = 0, onStatus = () => {}, optio
       response = await chrome.runtime.sendMessage({
         type: "bds-fetch-url",
         url: provider.url(providerQuery),
+        options: SEARCH_FETCH_OPTIONS,
       });
     } catch (err) {
       errors.push(`${provider.name}: ${err.message}`);
